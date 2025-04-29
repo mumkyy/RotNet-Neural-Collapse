@@ -19,7 +19,7 @@ import csv
 from pdb import set_trace as breakpoint
 
 # Set the paths of the datasets here.
-_CIFAR_DATASET_DIR = './datasets/CIFAR'
+_CIFAR_DATASET_DIR = './datasets/cifar10'
 _IMAGENET_DATASET_DIR = './datasets/IMAGENET/ILSVRC2012'
 _PLACES205_DATASET_DIR = './datasets/Places205'
 
