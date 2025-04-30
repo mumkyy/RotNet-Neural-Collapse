@@ -43,13 +43,13 @@ class Places205(data.Dataset):
 
         self.transform = transform
         self.target_transform = target_transform
-        with open(split_csv_file, 'rb') as f:
+        with open(split_csv_file, 'r', newline='') as f:
             reader = csv.reader(f, delimiter=' ')
             self.img_files = []
             self.labels = []
             for row in reader:
                 self.img_files.append(row[0])
-                self.labels.append(long(row[1]))
+                self.labels.append(int(row[1]))
 
     def __getitem__(self, index):
         """
@@ -95,20 +95,20 @@ class GenericDataset(data.Dataset):
 
             if self.split!='train':
                 transforms_list = [
-                    transforms.Scale(256),
+                    transforms.Resize(256),
                     transforms.CenterCrop(224),
                     lambda x: np.asarray(x),
                 ]
             else:
                 if self.random_sized_crop:
                     transforms_list = [
-                        transforms.RandomSizedCrop(224),
+                        transforms.RandomResizedCrop(224),
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x),
                     ]
                 else:
                     transforms_list = [
-                        transforms.Scale(256),
+                        transforms.Resize(256),
                         transforms.RandomCrop(224),
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x),
@@ -127,7 +127,7 @@ class GenericDataset(data.Dataset):
             else:
                 if self.random_sized_crop:
                     transforms_list = [
-                        transforms.RandomSizedCrop(224),
+                        transforms.RandomResizedCrop(224),
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x),
                     ]
@@ -157,7 +157,7 @@ class GenericDataset(data.Dataset):
                 _CIFAR_DATASET_DIR, train=self.split=='train',
                 download=True, transform=self.transform)
         else:
-            raise ValueError('Not recognized dataset {0}'.format(dname))
+            raise ValueError('Not recognized dataset {0}'.format(self.dataset_name))
         
         if num_imgs_per_cat is not None:
             self._keep_first_k_examples_per_category(num_imgs_per_cat)
@@ -167,8 +167,8 @@ class GenericDataset(data.Dataset):
         print('num_imgs_per_category {0}'.format(num_imgs_per_cat))
    
         if self.dataset_name=='cifar10':
-            labels = self.data.test_labels if (self.split=='test') else self.data.train_labels
-            data = self.data.test_data if (self.split=='test') else self.data.train_data
+            labels = self.data.targets        # works for both train and test objects
+            data   = self.data.data
             label2ind = buildLabelIndex(labels)
             all_indices = []
             for cat in label2ind.keys():
@@ -189,11 +189,11 @@ class GenericDataset(data.Dataset):
                 assert(len(v)==num_imgs_per_cat)
 
         elif self.dataset_name=='imagenet':
-            raise ValueError('Keeping k examples per category has not been implemented for the {0}'.format(dname))
-        elif self.dataset_name=='place205':
-            raise ValueError('Keeping k examples per category has not been implemented for the {0}'.format(dname))
+            raise ValueError('Keeping k examples per category has not been implemented for the {0}'.format(self.dataset_name))
+        elif self.dataset_name=='places205':
+            raise ValueError('Keeping k examples per category has not been implemented for the {0}'.format(self.dataset_name))
         else:
-            raise ValueError('Not recognized dataset {0}'.format(dname))
+            raise ValueError('Not recognized dataset {0}'.format(self.dataset_name))
 
 
     def __getitem__(self, index):
@@ -215,13 +215,13 @@ class Denormalize(object):
 
 def rotate_img(img, rot):
     if rot == 0: # 0 degrees rotation
-        return img
+        return img.copy()
     elif rot == 90: # 90 degrees rotation
-        return np.flipud(np.transpose(img, (1,0,2)))
+        return np.flipud(np.transpose(img, (1,0,2))).copy()
     elif rot == 180: # 90 degrees rotation
-        return np.fliplr(np.flipud(img))
+        return np.fliplr(np.flipud(img)).copy()
     elif rot == 270: # 270 degrees rotation / or -90
-        return np.transpose(np.flipud(img), (1,0,2))
+        return np.transpose(np.flipud(img), (1,0,2)).copy()
     else:
         raise ValueError('rotation should be 0, 90, 180, or 270 degrees')
 
@@ -300,7 +300,7 @@ class DataLoader(object):
         return self.get_iterator(epoch)
 
     def __len__(self):
-        return self.epoch_size / self.batch_size
+        return self.epoch_size // self.batch_size
 
 if __name__ == '__main__':
     from matplotlib import pyplot as plt

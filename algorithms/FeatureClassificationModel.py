@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 import utils
 import time
 
@@ -61,18 +60,18 @@ class FeatureClassificationModel(Algorithm):
         #********************************************************
 
         #***************** SET TORCH VARIABLES ******************
-        dataX_var = Variable(dataX, volatile=((not do_train) or (not finetune_feat_extractor)))
-        labels_var = Variable(labels, requires_grad=False)
+        dataX_var =dataX
+        labels_var = labels
         #********************************************************
 
         #************ FORWARD PROPAGATION ***********************
         feat_var = self.networks['feat_extractor'](dataX_var, out_feat_keys=out_feat_keys)
         if not finetune_feat_extractor:
-            if isinstance(feat_var, (list, tuple)):
-                for i in range(len(feat_var)):
-                    feat_var[i] = Variable(feat_var[i].data, volatile=(not do_train))
-            else:
-                feat_var = Variable(feat_var.data, volatile=(not do_train))
+            with torch.no_grad():             # no_grad scope
+                if isinstance(feat_var, (list, tuple)):
+                    feat_var = [f.detach() for f in feat_var]
+                else:
+                    feat_var = feat_var.detach()
         pred_var = self.networks['classifier'](feat_var)
         #********************************************************
 
@@ -89,7 +88,7 @@ class FeatureClassificationModel(Algorithm):
             loss_total = self.criterions['loss'](pred_var, labels_var)
             record['prec1'] = accuracy(pred_var.data, labels, topk=(1,))[0][0]
             record['prec5'] = accuracy(pred_var.data, labels, topk=(5,))[0][0]
-        record['loss'] = loss_total.data[0]
+        record['loss'] = loss_total.item()
         #********************************************************
 
         #****** BACKPROPAGATE AND APPLY OPTIMIZATION STEP *******

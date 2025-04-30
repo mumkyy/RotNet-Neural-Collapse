@@ -12,7 +12,9 @@ def main():
     parser.add_argument('--evaluate',    default=False, action='store_true')
     parser.add_argument('--checkpoint',  type=int,      default=0,     help='checkpoint (epoch id) that will be loaded')
     parser.add_argument('--num_workers', type=int,      default=4,     help='number of data loading workers')
-    parser.add_argument('--cuda',        type=bool,     default=True,  help='enables cuda')
+    parser.add_argument('--cuda', dest='cuda', action='store_true')
+    parser.add_argument('--no_cuda', dest='cuda', action='store_false')
+    parser.set_defaults(cuda=True)
     parser.add_argument('--disp_step',   type=int,      default=50,    help='display step during training')
     args_opt = parser.parse_args()
 
