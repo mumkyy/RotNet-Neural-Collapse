@@ -5,51 +5,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.autograd import Variable
 
 from torchvision import models, datasets, transforms
 from torch.utils.data import DataLoader
 
 from scipy.sparse.linalg import ArpackError  # <-- Add this import
 
-from our_models import NetSimpleConv, NetSimpleConv4
 
 import matplotlib.pyplot as plt
 import pickle
 import argparse
 import os
 
-parser = argparse.ArgumentParser(description='Neural Collapse measurement script on CIFAR-10 w/RotNet')
-parser.add_argument('-cr', '--criterion', default='mse', type=str, help='loss function used, cross entropy vs MSE (default)')
-parser.add_argument('-b', '--batch-size', default=128, type=int, help='mini-batch size (default: 128)')
-parser.add_argument('-lr', '--learning-rate', default=0.067, type=float, help='initial learning rate (default: 0.1)')
-parser.add_argument('-lr-decay', '--learning-rate-decay', default=0.1, type=float, help='learning rate decay (default: 0.1)')
-parser.add_argument('-mom', '--momentum', default=0.9, type=float, help='momentum (default: 0.9)')
-parser.add_argument('-wd', '--weight-decay', default=5e-4, type=float, help='weight decay (default: 5e-4)')
-parser.add_argument('--init-scale', default=1.0, type=float, help='initialization scale for network weights (default:1.0)')
-parser.add_argument('--epochs', default=350, type=int, help='total epochs (default: 350)')
-parser.add_argument('--lr-decay-steps', default=3, type=int, help='number of learning rate decay steps (default: 3)')
-parser.add_argument('--no-bias', action='store_true')
+parser = argparse.ArgumentParser(description='Neural Collapse measurement script')
 
 
-# dataset parameters
-im_size             = 28
-padded_im_size      = 32
-C                   = 10
-input_ch            = 1
-
-# analysis parameters
-epoch_list          = [1,   2,   3,   4,   5,   6,   7,   8,   9,   10,   11,
-                       12,  13,  14,  16,  17,  19,  20,  22,  24,  27,   29,
-                       32,  35,  38,  42,  45,  50,  54,  59,  65,  71,   77,
-                       85,  92,  101, 110, 121, 132, 144, 158, 172, 188,  206,
-                       225, 245, 268, 293, 320, 350]
+parser.add_argument('--model', required=True)
+#parser.add_argument('--dataset', required=True)
+#parser.add_argument('--epochs')
+#could add more as needed
 
 class Measurements:
   def __init__(self):
     self.accuracy     = []
     self.loss         = []
-    self.reg_loss     = []
 
     # NC1
     self.Sw_invSb     = []
@@ -77,14 +56,12 @@ def compute_metrics(measurements, model, criterion, dataloader, one_hot=False, u
     net_correct   = 0
     NCC_match_net = 0
 
-    class features:
-        pass
+    features = {}
+    def feature_hook(inp):
+        features['val'] = inp[0].detach()
 
-    def feature_hook(self, input, output):
-        features.value = input[0].clone()
-
-    model.conv5_sub.conv.register_forward_hook(feature_hook)
-    classifier = model.conv5_sub.conv
+    model.classifier.register_forward_hook(feature_hook)
+    classifier = model.classifier
 
     use_cuda = use_cuda and torch.cuda.is_available()
     if use_cuda:
@@ -95,11 +72,11 @@ def compute_metrics(measurements, model, criterion, dataloader, one_hot=False, u
         if one_hot:
             oh_labels = F.one_hot(labels, num_classes=C).float()
         if use_cuda:
-            inputs = Variable(inputs.cuda())
+            inputs = inputs.cuda()
             if one_hot:
-                oh_labels = Variable(oh_labels.cuda())
+                oh_labels = oh_labels.cuda()
             else:
-                labels = Variable(labels.cuda())
+                labels = labels.cuda()
         outputs = model(inputs)
 
         batchloss = criterion(outputs, oh_labels) if one_hot else criterion(outputs, labels)
@@ -123,11 +100,11 @@ def compute_metrics(measurements, model, criterion, dataloader, one_hot=False, u
         if one_hot:
             oh_labels = F.one_hot(labels, num_classes=C).float()
         if use_cuda:
-            inputs = Variable(inputs.cuda())
+            inputs = inputs.cuda()
             if one_hot:
-                oh_labels = Variable(oh_labels.cuda())
+                oh_labels = oh_labels.cuda()
             else:
-                labels = Variable(labels.cuda())
+                labels = labels.cuda()
         outputs = model(inputs)
 
         h = features.value.data.view(inputs.shape[0],-1) # B CHW
@@ -158,11 +135,6 @@ def compute_metrics(measurements, model, criterion, dataloader, one_hot=False, u
     measurements.loss.append(loss)
     measurements.accuracy.append(net_correct/sum(N))
     measurements.NCC_mismatch.append(1-NCC_match_net/sum(N))
-
-    reg_loss = loss
-    for param in model.parameters():
-        reg_loss += 0.5 * args.weight_decay * torch.sum(param**2).item()
-    measurements.reg_loss.append(reg_loss)
 
     # global mean
     muG = torch.mean(M, dim=1, keepdim=True) # CHW 1
@@ -221,44 +193,55 @@ def compute_metrics(measurements, model, criterion, dataloader, one_hot=False, u
     measurements.cos_M.append(coherence(M_/M_norms))
     measurements.cos_W.append(coherence(W.T/W_norms))
 
+
+
 if __name__ == "__main__":
+    #new main
+    pass
 
-    global args
-    args = parser.parse_args()
 
-    tx = transforms.Compose([transforms.Pad((padded_im_size-im_size)//2), transforms.ToTensor(), transforms.Normalize(0.1307,0.3081)])
-    data = datasets.MNIST(root='mnist', train=True, transform=tx,download=True)
-    dataloader = DataLoader(data, batch_size=args.batch_size)
 
-    if args.epochs > epoch_list[-1]:
-        epoch_list.extend(list(np.arange(epoch_list[-1],args.epochs,8))[1:])
-        epoch_list.append(args.epochs)
 
-    save_dir = 'mnist_regular_expt_lr%.3f_wd%.4f'%(args.learning_rate, args.weight_decay)
-    if args.no_bias:
-        save_dir += '_no_bias'
 
-    save_dir = os.path.join(save_dir, 'mse' if args.criterion=='mse' else 'cross_entropy')
+#old main
+# if __name__ == "__main__":
 
-    measurements = Measurements()
-    for e in epoch_list:
-        print('Loading %s : %d.pt'%(save_dir,e))
-        model = NetSimpleConv(input_ch, 32, C, init_scale=0.01, bias= not args.no_bias)
-        model.load_state_dict(torch.load(os.path.join(save_dir,'%d.pt'%(e)), map_location=torch.device('cpu')))
+#     global args
+#     args = parser.parse_args()
 
-       # model = torch.load('mnist_regular_expt_0.001/%s/%d.pt'%(l,e),map_location=torch.device('cpu'))
-        criterion = nn.MSELoss(reduction='sum') if args.criterion=='mse' else nn.CrossEntropyLoss(reduction='sum')
-        compute_metrics(measurements, model, criterion, dataloader, one_hot= args.criterion=='mse', use_cuda=True)
+#     tx = transforms.Compose([transforms.Pad((padded_im_size-im_size)//2), transforms.ToTensor(), transforms.Normalize(0.1307,0.3081)])
+#     data = datasets.MNIST(root='mnist', train=True, transform=tx,download=True)
+#     dataloader = DataLoader(data, batch_size=args.batch_size)
 
-    with open(os.path.join(save_dir,'%s.pkl'%(args.criterion,)), 'wb') as f:
-        pickle.dump(measurements,f)
+#     if args.epochs > epoch_list[-1]:
+#         epoch_list.extend(list(np.arange(epoch_list[-1],args.epochs,8))[1:])
+#         epoch_list.append(args.epochs)
 
-    if not os.path.exists(os.path.join(save_dir, 'plots')):
-        os.makedirs(os.path.join(save_dir, 'plots'))
+#     save_dir = 'mnist_regular_expt_lr%.3f_wd%.4f'%(args.learning_rate, args.weight_decay)
+#     if args.no_bias:
+#         save_dir += '_no_bias'
 
-    attrs = ['accuracy', 'loss', 'reg_loss', 'Sw_invSb', 'norm_M_CoV', 'norm_W_CoV', 'cos_M', 'cos_W', 'W_M_dist', 'NCC_mismatch']
-    for a in attrs:
-        plt.plot(epoch_list, getattr(measurements, a), 'bx-')
-        plt.title(a)
-        plt.savefig(os.path.join(os.path.join(save_dir, 'plots'), '%s.pdf'%(a,)))
-        plt.close()
+#     save_dir = os.path.join(save_dir, 'mse' if args.criterion=='mse' else 'cross_entropy')
+
+#     measurements = Measurements()
+#     for e in epoch_list:
+#         print('Loading %s : %d.pt'%(save_dir,e))
+#         model = NetSimpleConv(input_ch, 32, C, init_scale=0.01, bias= not args.no_bias)
+#         model.load_state_dict(torch.load(os.path.join(save_dir,'%d.pt'%(e)), map_location=torch.device('cpu')))
+
+#        # model = torch.load('mnist_regular_expt_0.001/%s/%d.pt'%(l,e),map_location=torch.device('cpu'))
+#         criterion = nn.MSELoss(reduction='sum') if args.criterion=='mse' else nn.CrossEntropyLoss(reduction='sum')
+#         compute_metrics(measurements, model, criterion, dataloader, one_hot= args.criterion=='mse', use_cuda=True)
+
+#     with open(os.path.join(save_dir,'%s.pkl'%(args.criterion,)), 'wb') as f:
+#         pickle.dump(measurements,f)
+
+#     if not os.path.exists(os.path.join(save_dir, 'plots')):
+#         os.makedirs(os.path.join(save_dir, 'plots'))
+
+#     attrs = ['accuracy', 'loss', 'Sw_invSb', 'norm_M_CoV', 'norm_W_CoV', 'cos_M', 'cos_W', 'W_M_dist', 'NCC_mismatch']
+#     for a in attrs:
+#         plt.plot(epoch_list, getattr(measurements, a), 'bx-')
+#         plt.title(a)
+#         plt.savefig(os.path.join(os.path.join(save_dir, 'plots'), '%s.pdf'%(a,)))
+#         plt.close()
