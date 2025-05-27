@@ -193,6 +193,7 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
         keep = evals.argsort(descending=True)[:C-1]
         Λinv = torch.diag(1. / evals[keep])
         Σb_inv = evecs[:, keep] @ Λinv @ evecs[:, keep].T   # D×D
+        Σb_inv = Σb_inv.to(device)  
         Sw_invSb = (Sw.to(device) * Σb_inv).sum().item()    # trace(A B)=sum(A*B)
     else:
         # ---------- CPU path: SciPy sparse SVD (identical to before) ---
