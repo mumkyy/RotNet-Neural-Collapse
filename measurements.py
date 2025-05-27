@@ -183,7 +183,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
     # NC-1
     try:
         k = min(C-1, Sw.shape[0]-1)
-        eigv, eigval, _ = svds((Mmat-muG)@(Mmat-muG).T/C, k=k)
+        Sb_np = ((Mmat - muG) @ (Mmat - muG).T / C).cpu().numpy()   
+        eigv, eigval, _ = svds(Sb_np, k=k)          
         invSb = eigv @ np.diag(eigval**-1) @ eigv.T
         Sw_invSb = np.trace(Sw.numpy() @ invSb)
     except (ValueError, ArpackError):
