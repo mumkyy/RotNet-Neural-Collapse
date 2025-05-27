@@ -180,19 +180,24 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
 # -----------------------------------------------------------------------------
 def parse_args():
     p = argparse.ArgumentParser("Measure NC on a RotNet experiment")
-    p.add_argument('--exp',        required=True,
-                   help='experiment name, e.g. CIFAR10_RotNet_NIN4blocks')
-    p.add_argument('--checkpoint', type=int, default=0,
-                   help='epoch id of model_net_epochXX to load')
+    p.add_argument('--exp',        required=True, help='experiment name, used to find config/config_<exp>.py')
+    p.add_argument('--exp_dir',    default=None, help='(optional) full path to the experiment directory; overrides experiments/<exp>')
+    p.add_argument('--checkpoint', type=int, default=0, help='epoch id of model_net_epochXX to load')
     p.add_argument('--batch-size', type=int, default=256)
     p.add_argument('--workers',    type=int, default=4)
     p.add_argument('--no_cuda',    action='store_true')
+    p.add_argument('--start-epoch', type=int, default=1, help='first epoch to measure (inclusive)')
+    p.add_argument('--end-epoch',   type=int, default=None, help='last epoch to measure (inclusive)')
     return p.parse_args()
 
 if __name__=='__main__':
     args = parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
+    if not use_cuda:                       # i.e. you passed --no_cuda
+        _orig_load = torch.load
+        torch.load = lambda f, **kw: _orig_load(f, map_location=torch.device('cpu'))
     set_seed(42)
+    
 
     # 1) load config
     cfg_file = Path('config')/f"{args.exp}.py"
@@ -200,7 +205,10 @@ if __name__=='__main__':
     cfg_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cfg_mod)
     config = cfg_mod.config
-    exp_dir = Path('experiments')/args.exp
+    if args.exp_dir:
+        exp_dir = Path(args.exp_dir)
+    else:
+       exp_dir = Path('experiments') / args.exp    
     config['exp_dir'] = str(exp_dir)
 
     # 2) build loader
@@ -231,46 +239,55 @@ if __name__=='__main__':
         algo.load_to_gpu()
     algo.load_checkpoint(args.checkpoint, train=False)
 
-    # 4) get the trained network
-    model = None
-    # priority: look into algo.networks dict if present
-    if hasattr(algo, 'networks') and isinstance(algo.networks, dict):
-        for key, val in algo.networks.items():
-            if isinstance(val, nn.Module):
-                model = val
-                print(f"Using algorithm.networks['{key}'] as the model")
-                break
-    # fallback: direct attributes 'net' or 'model'
-    if model is None:
-        for attr_name in ('net', 'model'):
-            if hasattr(algo, attr_name):
-                attr = getattr(algo, attr_name)
-                if isinstance(attr, nn.Module):
-                    model = attr
-                    print(f"Using algorithm.{attr_name} as the model")
-                    break
-    # final fallback: any other nn.Module
-    if model is None:
-        for name in dir(algo):
-            attr = getattr(algo, name)
-            if isinstance(attr, nn.Module):
-                model = attr
-                print(f"Using algorithm.{name} as the model")
-                break
-    if model is None:
-        raise RuntimeError("Could not find a torch.nn.Module network on the algorithm object")
+    # figure out which epochs to process
+    exp_dir = Path(config['exp_dir'])
+    # grab all "model_net_epochXX" files and extract XX
+    all_files = list(exp_dir.glob('*_net_epoch*'))
+    all_epochs = sorted(int(f.stem.split('epoch')[-1]) for f in all_files)
+    start = args.start_epoch
+    end   = args.end_epoch or max(all_epochs)
+    epoch_list = [e for e in all_epochs if start <= e <= end]
+    if not epoch_list:
+        raise RuntimeError(f"No checkpoints found in {exp_dir} between epochs {start}–{end}")
 
-# 5) measure
+    # 4) measure over all epochs
     metrics = Measurements()
-    compute_metrics(metrics, model, loader, C, feat_layer)
+    for e in epoch_list:
+        print(f"\n[Measurement] Loading checkpoint epoch {e}")
+        algo.load_checkpoint(e, train=False)
+        # pull out the nn.Module exactly as before...
+        # (your existing fallback logic that sets `model` from `algo`)
+        model = None
+        if hasattr(algo, 'networks'):
+            for k,v in algo.networks.items():
+                if isinstance(v, nn.Module):
+                    model = v; break
+        if model is None:
+            for name in ('model','net'):
+                cand = getattr(algo, name, None)
+                if isinstance(cand, nn.Module):
+                    model = cand; break
+        if model is None:
+            raise RuntimeError("Couldn't find a torch.nn.Module in algo")
 
-    # 6) save
-    save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{args.batch_size}_ckpt{args.checkpoint}"
+        # now compute and append a single point
+        compute_metrics(metrics, model, loader, C, feat_layer)
+
+    # 5) save  plot curves vs epoch_list (instead of len=1)
+    save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{args.batch_size}_epochs{start}-{end}"
     (save_dir/'plots').mkdir(parents=True, exist_ok=True)
     with open(save_dir/'metrics.pkl','wb') as f:
-        pickle.dump(metrics, f)
+        pickle.dump({'epochs': epoch_list, 'metrics': metrics}, f)
+
+    # plotting
     for name in vars(metrics):
-        plt.figure(); plt.plot(getattr(metrics, name), 'bx-')
-        plt.title(name); plt.tight_layout()
-        plt.savefig(save_dir/'plots'/f"{name}.pdf"); plt.close()
+        plt.figure()
+        plt.plot(epoch_list, getattr(metrics, name), 'bx-')
+        plt.xlabel('epoch')
+        plt.ylabel(name)
+        plt.title(f"{name} vs epoch")
+        plt.tight_layout()
+        plt.savefig(save_dir/'plots'/f"{name}.pdf")
+        plt.close()
+
     print("✓  Done – results in", save_dir)
