@@ -1,22 +1,62 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-Measure Neural-Collapse stats (NC-1 … NC-4) on a trained RotNet experiment.
+================================================================================
+Neural-Collapse Metric Suite for RotNet Checkpoints
+================================================================================
 
-Usage:
+This script scans **one or many** saved checkpoints from a RotNet experiment
+and produces the four canonical Neural-Collapse statistics (NC-1 … NC-4) plus
+auxiliary curves (loss, accuracy, NCC mismatch).  Results are stored as a
+`metrics.pkl` file *and* as tidy PDF plots vs. training epoch.
+
+Typical one-liner
+-----------------
+    # analyse a single checkpoint on CPU
     python measurements.py \
-      --exp CIFAR10_RotNet_NIN4blocks \
-      --checkpoint 44 \
-      --batch-size 512 \
-      --workers 0 \
-      [--no_cuda]
+        --exp       CIFAR10_RotNet_NIN4blocks \
+        --checkpoint 44 \
+        --batch-size 512 \
+        --workers   0 \
+        --no_cuda
 
-This will:
-  1) load config/config_<exp>.py
-  2) build train/test loaders exactly as main.py does
-  3) instantiate your Algorithm, load its checkpoint
-  4) extract the trained network, run NC metrics
-  5) write results/…/metrics.pkl + PDF plots
+Full feature set
+----------------
+Argument            | Meaning & examples
+------------------- | ---------------------------------------------------------
+`--exp` *NAME*      | Experiment name **without** path. Must have a matching
+                    | `config/config_<NAME>.py` and (by default) checkpoints in
+                    | `experiments/<NAME>/`.
+`--exp_dir` *PATH*  | **Override** the automatic directory above, e.g.\
+                    | `--exp_dir "D:/runs/RotNet/CIFAR10_RotNet_NIN4blocks"`.
+`--checkpoint` *N*  | Epoch ID to load first (default 0 = start from earliest
+                    | checkpoint found). \
+                    | Use together with `--start-epoch / --end-epoch` to scan a
+                    | **range** of epochs in one shot.
+`--start-epoch` *N* | First epoch to analyse (inclusive, default 1).
+`--end-epoch` *N*   | Last  epoch to analyse (inclusive, default = latest file).
+`--batch-size`      | Forward-pass batch size for metric computation
+                    | (does **not** affect training).
+`--workers`         | Dataloader workers (same as in training config).
+`--no_cuda`         | Force CPU evaluation even if a GPU is visible.
+
+What the script actually does
+-----------------------------
+1. **Load config**   (`config/<exp>.py`) – identical to *main.py*.
+2. **Recreate loaders** for the 4-rotation self-supervised task.
+3. **Instantiate** the chosen `Algorithm` class, *but without* resuming
+   optimisation (we only need the networks).
+4. **Iterate over checkpoints**  
+   (`<exp_dir>/*_net_epochXX`) and for each epoch:
+   • feed the entire train split once  
+   • compute NC-1 … NC-4, loss, accuracy, NCC-mismatch.
+5. **Save outputs** to  
+   `results/<exp>_<arch>/bs<batch>_epochs<first>-<last>/`:
+   * `metrics.pkl`   – pickled dict with `epochs` and all curves  
+   * `plots/*.pdf`   – one figure per metric.
+
+The script is read-only with respect to your experiment folder; it never
+overwrites checkpoints.
 """
 import argparse, importlib.util, os, pickle, random
 from pathlib import Path
