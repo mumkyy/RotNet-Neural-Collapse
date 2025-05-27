@@ -206,12 +206,10 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
         except (ValueError, ArpackError):
             Sw_invSb = float('nan')
 
-    M.Sw_invSb.append(Sw_invSb)
-
 
     # NC-2
     W = cls_layer.weight.T
-    M_c = Mmat-muG
+    M_c = (Mmat - muG).to(W.device)
     Mn, Wn = M_c.norm(0), W.norm(0)
     covM = (Mn.std()/Mn.mean()).item()
     covW = (Wn.std()/Wn.mean()).item()
