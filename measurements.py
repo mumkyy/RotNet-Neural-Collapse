@@ -180,15 +180,33 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
     acc  = net_correct / N
     NCCm = 1 - NCC_match / N
 
-    # NC-1
-    try:
-        k = min(C-1, Sw.shape[0]-1)
-        Sb_np = ((Mmat - muG) @ (Mmat - muG).T / C).cpu().numpy()   
-        eigv, eigval, _ = svds(Sb_np, k=k)          
-        invSb = eigv @ np.diag(eigval**-1) @ eigv.T
-        Sw_invSb = np.trace(Sw.numpy() @ invSb)
-    except (ValueError, ArpackError):
-        Sw_invSb = float('nan')
+    # ------------------------------------------------------------------
+    # NC-1  -- trace(S_w Σ_b-1)  (GPU-aware)
+    # ------------------------------------------------------------------
+    if device == 'cuda':
+        # --- 1. compute Σ_b  (= between-class scatter) on GPU ----------
+        Sb = (Mmat - muG) @ (Mmat - muG).T / C        # D×D torch tensor (GPU)
+        # --- 2. eigendecomp.  We only need the non-zero eigen-pairs
+        #     If D <= C you could use torch.linalg.inv, but in CNNs D>>C.
+        evals, evecs = torch.linalg.eigh(Sb)          # *all* eigen-pairs
+        # keep the C-1 largest (the smallest one is ≈0 by construction)
+        keep = evals.argsort(descending=True)[:C-1]
+        Λinv = torch.diag(1. / evals[keep])
+        Σb_inv = evecs[:, keep] @ Λinv @ evecs[:, keep].T   # D×D
+        Sw_invSb = (Sw.to(device) * Σb_inv).sum().item()    # trace(A B)=sum(A*B)
+    else:
+        # ---------- CPU path: SciPy sparse SVD (identical to before) ---
+        Sb_np  = ((Mmat - muG) @ (Mmat - muG).T / C).cpu().numpy()
+        try:
+            k      = min(C-1, Sb_np.shape[0] - 1)
+            eigv, eigval, _ = svds(Sb_np, k=k)
+            Σb_inv = eigv @ np.diag(eigval**-1) @ eigv.T
+            Sw_invSb = np.trace(Sw.cpu().numpy() @ Σb_inv)
+        except (ValueError, ArpackError):
+            Sw_invSb = float('nan')
+
+    M.Sw_invSb.append(Sw_invSb)
+
 
     # NC-2
     W = cls_layer.weight.T
