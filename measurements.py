@@ -210,9 +210,9 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
     # NC-2
     W = cls_layer.weight.T
     M_c = (Mmat - muG).to(W.device)
-    Mn, Wn = M_c.norm(0), W.norm(0)
-    covM = (Mn.std()/Mn.mean()).item()
-    covW = (Wn.std()/Wn.mean()).item()
+    Mn, Wn = M_c.norm(p=2, dim=0), W.norm(p=2, dim=0)
+    covM = (Mn.std(unbiased=False)/Mn.mean()).item()
+    covW = (Wn.std(unbiased=False)/Wn.mean()).item()
     def coherence(V):
         G = V.T@V
         G = G/(G.norm(1,keepdim=True)+1e-9)
