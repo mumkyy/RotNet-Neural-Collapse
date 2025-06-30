@@ -56,10 +56,10 @@ class Classifier(nn.Module):
             nFeats = min(num_classes*20, 2048)
             self.classifier.add_module('GlobalAvgPool', GlobalAvgPool())
             self.classifier.add_module('Liniear_1',   nn.Linear(nChannels, nFeats, bias=False))
-            self.classifier.add_module('BatchNorm_1', nn.BatchNorm2d(nFeats))
+            self.classifier.add_module('BatchNorm_1', nn.BatchNorm1d(nFeats))
             self.classifier.add_module('ReLU_1',      nn.ReLU(inplace=True))
             self.classifier.add_module('Liniear_2',   nn.Linear(nFeats, nFeats, bias=False))
-            self.classifier.add_module('BatchNorm2d', nn.BatchNorm2d(nFeats))
+            self.classifier.add_module('BatchNorm_2', nn.BatchNorm1d(nFeats))
             self.classifier.add_module('ReLU_2',      nn.ReLU(inplace=True))
             self.classifier.add_module('Liniear_F',   nn.Linear(nFeats, num_classes))
         elif self.cls_type == 'NIN_ConvBlock3':
