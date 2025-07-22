@@ -129,6 +129,7 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
                 N_per_class[c] += hc.size(0)
 
     means = [s / max(n,1) for s,n in zip(sum_per_class, N_per_class)]
+    means = [m.to(device) for m in means]
     Mmat  = torch.stack(means).T
     muG   = Mmat.mean(1, keepdim=True)
 
@@ -143,7 +144,7 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
             idx = (y.cpu()==c).nonzero(as_tuple=False).squeeze(1)
             if idx.numel():
                 hc = h[idx]
-                z  = hc - means[c]
+                z  = hc - means[c].to(hc.device)
                 Sw += z.T @ z
 
 
