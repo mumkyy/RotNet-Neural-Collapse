@@ -287,23 +287,23 @@ if __name__=='__main__':
         compute_metrics(metrics, model, loader, C, layer)
         nc1_per_layer[layer] = metrics.Sw_invSb[-1]
 
-        # 5) save plot curves vs epoch_list (instead of len=1)
-        save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{args.batch_size}"
-  
-        x = list(nc1_per_layer.keys())
-        y = [nc1_per_layer[l] for l in x]
-    
-        plt.figure()
-        plt.plot(range(len(x)), y, 'bx-')
-        plt.xticks(range(len(x)), x, rotation=45, ha='right')
-        plt.xlabel('Layer')
-        plt.ylabel('NC1')
-        plt.title(f'NC1 across layers at checkpoint')
-        plt.tight_layout()
-        plt.savefig(save_dir/'plots'/f"NC1_layers_checkpoint.pdf")
-        plt.close()
+    # 5) save plot curves vs epoch_list (instead of len=1)
+    save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{args.batch_size}"
 
-        print("✓  Done – results in", save_dir)
+    x = list(nc1_per_layer.keys())
+    y = [nc1_per_layer[l] for l in x]
+
+    plt.figure()
+    plt.plot(range(len(x)), y, 'bx-')
+    plt.xticks(range(len(x)), x, rotation=45, ha='right')
+    plt.xlabel('Layer')
+    plt.ylabel('NC1')
+    plt.title(f'NC1 across layers at checkpoint')
+    plt.tight_layout()
+    plt.savefig(save_dir/'plots'/f"NC1_layers_checkpoint.pdf")
+    plt.close()
+
+    print("✓  Done – results in", save_dir)
 
 
 
