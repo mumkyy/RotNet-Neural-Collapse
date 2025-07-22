@@ -113,7 +113,7 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
         h   = feats['h'].view(len(x), -1)
 
         if Sw.numel()==0:
-            Sw = torch.zeros(h.size(1), h.size(1))
+            Sw = torch.zeros(h.size(1), h.size(1),device=device)
 
         total_loss += loss_fn(out, y).item() * len(x)
         net_correct += (out.argmax(1).cpu()==y.cpu()).sum().item()
@@ -144,7 +144,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
             if idx.numel():
                 hc = h[idx]
                 z  = hc - means[c]
-                Sw += (z.unsqueeze(2) @ z.unsqueeze(1)).sum(0)
+                Sw += z.T @ z
+
 
     print("[Measurement] Finalizing metrics...")
 
@@ -186,6 +187,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
     M.loss.append(loss)
     M.Sw_invSb.append(Sw_invSb)
     handle.remove()
+    feats.clear()
+
 
 # -----------------------------------------------------------------------------
 # CLI & Main script
@@ -260,7 +263,7 @@ if __name__=='__main__':
     layers = feat_extractor.all_feat_names
 
     nc1_per_layer = {}
-    for layer in layers:
+    for layer in tqdm(layers,desc="Measuring NC1 per layer"):
         # 4) measure over all layers
         metrics = Measurements()
         print(f"\n[Measurement] Loading checkpoint")
