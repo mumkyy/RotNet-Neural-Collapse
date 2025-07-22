@@ -286,10 +286,20 @@ if __name__=='__main__':
         # now compute and append a single point
         compute_metrics(metrics, model, loader, C, layer)
         nc1_per_layer[layer] = metrics.Sw_invSb[-1]
+    
+
 
     # 5) save plot curves vs epoch_list (instead of len=1)
     save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{args.batch_size}"
     (save_dir / 'plots').mkdir(parents=True, exist_ok=True)
+
+    #print out the exact values 
+    out_file = save_dir / 'NC1WrittenVals.txt'
+    with open(out_file, 'w') as fp:
+        fp.write(f"NC1 metrics for checkpoint {args.checkpoint}\n")
+        for layer, val in nc1_per_layer.items():
+            fp.write(f"{layer}: {val:.6f}\n")
+    print(f"✓ NC1 values written to {out_file}")
 
     x = list(nc1_per_layer.keys())
     y = [nc1_per_layer[l] for l in x]
