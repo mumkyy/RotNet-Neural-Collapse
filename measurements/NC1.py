@@ -56,7 +56,6 @@ from tqdm import tqdm  # added for progress bars
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
-from scipy.sparse.linalg import svds, ArpackError
 from torch.utils.data import DataLoader
 
 # -----------------------------------------------------------------------------
@@ -77,7 +76,7 @@ class Measurements:
     def __init__(self):
         self.accuracy = []
         self.loss     = []
-        self.Sw_invSb = [] #nc1 
+        self.trSwtrSb = [] #nc1 
         
 # -----------------------------------------------------------------------------
 # Compute NC metrics in one full pass
@@ -157,36 +156,23 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
     acc  = net_correct / N
 
     # ------------------------------------------------------------------
-    # NC-1  -- trace(S_w Σ_b-1)  (GPU-aware)
+    # NC-1  -- trace ratio (Tr(Sw) / Tr(Sb)) (GPU-aware)
     # ------------------------------------------------------------------
-    if device == 'cuda':
-        # --- 1. compute Σ_b  (= between-class scatter) on GPU ----------
-        Sb = (Mmat - muG) @ (Mmat - muG).T / C        # D×D torch tensor (GPU)
-        # --- 2. eigendecomp.  We only need the non-zero eigen-pairs
-        #     If D <= C you could use torch.linalg.inv, but in CNNs D>>C.
-        evals, evecs = torch.linalg.eigh(Sb)          # *all* eigen-pairs
-        # keep the C-1 largest (the smallest one is ≈0 by construction)
-        keep = evals.argsort(descending=True)[:C-1]
-        Λinv = torch.diag(1. / evals[keep])
-        Σb_inv = evecs[:, keep] @ Λinv @ evecs[:, keep].T   # D×D
-        Σb_inv = Σb_inv.to(device)  
-        Sw_invSb = (Sw.to(device) * Σb_inv).sum().item()    # trace(A B)=sum(A*B)
-    else:
-        # ---------- CPU path: SciPy sparse SVD (identical to before) ---
-        Sb_np  = ((Mmat - muG) @ (Mmat - muG).T / C).cpu().numpy()
-        try:
-            k      = min(C-1, Sb_np.shape[0] - 1)
-            eigv, eigval, _ = svds(Sb_np, k=k)
-            Σb_inv = eigv @ np.diag(eigval**-1) @ eigv.T
-            Sw_invSb = np.trace(Sw.cpu().numpy() @ Σb_inv)
-        except (ValueError, ArpackError):
-            Sw_invSb = float('nan')
 
+    # --- 1. compute Σ_b  (= between-class scatter) on GPU ----------
+    Sb = (Mmat - muG) @ (Mmat - muG).T / C        # D×D torch tensor (GPU)
+    # simple trace‐ratio NC1
+    trace_Sw = Sw.trace()                  # sum of diagonal of Sw
+    trace_Sb = Sb.trace()                  # sum of diagonal of Sb
+    # guard tiny denominators
+    eps = 1e-12
+    nc1_ratio = trace_Sw / (trace_Sb + eps)
+    trSwtrSb = nc1_ratio.item()            # now holds Tr(Sw)/Tr(Sb)
 
     # store
     M.accuracy.append(acc)
     M.loss.append(loss)
-    M.Sw_invSb.append(Sw_invSb)
+    M.trSwtrSb.append(trSwtrSb)
     handle.remove()
     feats.clear()
 
@@ -285,7 +271,7 @@ if __name__=='__main__':
 
         # now compute and append a single point
         compute_metrics(metrics, model, loader, C, layer)
-        nc1_per_layer[layer] = metrics.Sw_invSb[-1]
+        nc1_per_layer[layer] = metrics.trSwtrSb[-1]
     
 
 
