@@ -289,6 +289,7 @@ if __name__=='__main__':
 
     # 5) save plot curves vs epoch_list (instead of len=1)
     save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{args.batch_size}"
+    (save_dir / 'plots').mkdir(parents=True, exist_ok=True)
 
     x = list(nc1_per_layer.keys())
     y = [nc1_per_layer[l] for l in x]
