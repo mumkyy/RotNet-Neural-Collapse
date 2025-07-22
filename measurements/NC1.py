@@ -95,7 +95,7 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
     # 3) hook it
     feats: Dict[str,torch.Tensor] = {}
     def feat_hook(module, inp, out):
-        feats['h'] = out.detach().cpu().view(out.size(0),-1)
+        feats['h'] = out.detach().view(out.size(0),-1)
     handle = feat_module.register_forward_hook(feat_hook)
 
     N_per_class = torch.zeros(C, dtype=torch.long)
