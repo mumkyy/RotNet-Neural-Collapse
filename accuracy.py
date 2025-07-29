@@ -1,66 +1,56 @@
 #!/usr/bin/env python3
-"""
-parse_rotnet_log.py
-
-Extract <epoch, prec1> from a RotNet-Neural-Collapse training log and plot accuracy vs. epoch.
-
-$ python accuracy.py path/to/LOG_INFO.txt
-"""
 import re
-import sys
-from pathlib import Path
-import pandas as pd
-import matplotlib.pyplot as plt
-import os
-
+import argparse
 
 def parse_log(path):
-    """Return a DataFrame with columns epoch and prec1."""
-    ep_re   = re.compile(r"Training epoch \[\s*(\d+)")
-    res_re  = re.compile(r"Results:.*'prec1':\s*([\d.]+)")
-
+    train_acc  = []  # list of (epoch, prec1)
+    val_acc    = []  # list of (epoch, prec1)
     current_epoch = None
-    rows = []
 
-    with path.open("r", encoding="utf-8", errors="ignore") as f:
+    # regexes
+    epoch_re   = re.compile(r"Training epoch\s*\[\s*(\d+)\s*/\s*\d+\]")
+    train_re   = re.compile(r"Training stats: \{[^}]*'prec1':\s*([\d.]+)")
+    eval_re    = re.compile(r"Evaluation stats: \{[^}]*'prec1':\s*([\d.]+)")
+
+    with open(path, 'r') as f:
         for line in f:
-            ep_match = ep_re.search(line)
-            if ep_match:                       # found a new epoch header
-                current_epoch = int(ep_match.group(1))
+            # detect epoch number
+            m = epoch_re.search(line)
+            if m:
+                current_epoch = int(m.group(1))
                 continue
 
-            res_match = res_re.search(line)
-            if res_match and current_epoch is not None:
-                prec1 = float(res_match.group(1))
-                rows.append((current_epoch, prec1))
-                current_epoch = None           # reset until next epoch
+            # detect train stats
+            m = train_re.search(line)
+            if m and current_epoch is not None:
+                train_acc.append((current_epoch, float(m.group(1))))
+                continue
 
-    if not rows:
-        raise ValueError("No epoch/prec1 pairs found – check the regexes.")
+            # detect eval stats
+            m = eval_re.search(line)
+            if m and current_epoch is not None:
+                val_acc.append((current_epoch, float(m.group(1))))
+                continue
 
-    df = pd.DataFrame(rows, columns=["epoch", "prec1"]).sort_values("epoch")
-    return df
+    return train_acc, val_acc
 
+def report_max(acc_list, name):
+    if not acc_list:
+        print(f"No {name} entries found.")
+        return
+    # find entry with max accuracy
+    epoch, best = max(acc_list, key=lambda x: x[1])
+    print(f"Best {name} top-1 accuracy = {best:.4f}% at epoch {epoch}")
 
 def main():
-    if len(sys.argv) < 2:
-        sys.exit("Usage: python parse_rotnet_log.py <logfile>")
+    parser = argparse.ArgumentParser(
+        description="Extract highest train/val top-1 accuracy from log")
+    parser.add_argument("logfile", help="path to the training log file")
+    args = parser.parse_args()
 
-    log_path = Path(sys.argv[1])
-    df = parse_log(log_path)
-    print(df)
-    
-    visuals = Path("visuals")
-    visuals.mkdir(exist_ok=True)
-    out_png = visuals / f"{log_path.stem}_accuracy.png"
-
-    df.plot(x="epoch", y="prec1", legend=False, marker="o")
-    plt.title(log_path.name)
-    plt.ylabel("top-1 accuracy (%)")
-    plt.tight_layout()
-    plt.savefig(out_png, dpi=150)
-    plt.close()
-
+    train_acc, val_acc = parse_log(args.logfile)
+    report_max(train_acc, "training")
+    report_max(val_acc,   "validation")
 
 if __name__ == "__main__":
     main()
