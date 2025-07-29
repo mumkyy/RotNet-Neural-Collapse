@@ -12,6 +12,7 @@ import PIL
 import pickle
 from tqdm import tqdm
 import time
+import torch.nn.functional as F
 
 from . import Algorithm
 from pdb import set_trace as breakpoint
@@ -73,10 +74,19 @@ class ClassificationModel(Algorithm):
         #********************************************************
 
         #*************** COMPUTE LOSSES *************************
+        crit = self.criterions['loss']
+        if isinstance(crit, nn.MSELoss):
+            # one-hot encode targets for MSE
+            C = pred_var.size(1)
+            y_oh = F.one_hot(labels_var, num_classes=C).float().to(pred_var.device)
+            loss_total = crit(pred_var, y_oh)
+        else:
+            loss_total = crit(pred_var, labels_var)
+
         record = {}
-        loss_total = self.criterions['loss'](pred_var, labels_var)
-        record['prec1'] = accuracy(pred_var.data, labels, topk=(1,))[0].item()
-        record['loss'] = loss_total.item()
+        # precision still computed on raw logits
+        record['prec1'] = accuracy(pred_var.data, labels_var, topk=(1,))[0].item()
+        record['loss']  = loss_total.item()
         #********************************************************
 
         #****** BACKPROPAGATE AND APPLY OPTIMIZATION STEP *******
