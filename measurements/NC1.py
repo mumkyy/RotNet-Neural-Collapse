@@ -6,7 +6,7 @@ Neural-Collapse NC1-per-Layer Measurement for RotNet Checkpoints
 ================================================================================
 
 This script loads a single RotNet checkpoint and computes the Neural Collapse 1 metric
-(NC‑1 = trace(S_w Σ_b^{-1})) for each feature layer in the backbone.  The per-layer
+(NC‑1 = trace(S_w)/trace(S_b) for each feature layer in the backbone.  The per-layer
 NC‑1 scores are saved to a results directory and a PDF plot showing NC‑1 vs. layer is
 written.
 
@@ -36,7 +36,7 @@ What the script does
    • Hooks the layer's output, flattens spatial dimensions.
    • Runs a forward pass over the train split to collect features and labels.
    • Computes within-class scatter S_w and between-class scatter S_b.
-   • Calculates NC‑1 = trace(S_w Σ_b^{-1}) for that layer.
+   • Calculates NC‑1 = trace(S_w)/trace(S_b) for that layer.
 5. Saves a PDF plot `NC1_layers_checkpoint.pdf` under `results/<exp>_NetworkInNetwork/bs<B>/plots/`.
 
 Results

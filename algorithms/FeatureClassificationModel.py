@@ -2,6 +2,7 @@ import time
 import torch
 from . import Algorithm
 from pdb import set_trace as breakpoint
+import torch.nn.functional as F
 
 
 # ------------------------------------------------------------------ #
@@ -85,19 +86,33 @@ class FeatureClassificationModel(Algorithm):
 
         # ---------- loss & metrics --------------------------------
         record = {}
+        crit = self.criterions['loss']
         if isinstance(pred, (list, tuple)):
             loss_total = None
             for i, p in enumerate(pred):
-                loss = self.criterions['loss'](p, labels)
+                if isinstance(crit, torch.nn.MSELoss):
+                    # one‐hot encode
+                    K    = p.size(1)
+                    y_oh = F.one_hot(labels, num_classes=K).float().to(p.device)
+                    loss = crit(p, y_oh)
+                else:
+                    loss = crit(p, labels)
                 loss_total = loss if loss_total is None else loss_total + loss
                 record[f'prec1_c{i+1}'] = accuracy(p, labels, (1,))[0]   # ★
                 record[f'prec5_c{i+1}'] = accuracy(p, labels, (5,))[0]   # ★
         else:
-            loss_total = self.criterions['loss'](pred, labels)
-            record['prec1'] = accuracy(pred, labels, (1,))[0]            # ★
-            record['prec5'] = accuracy(pred, labels, (5,))[0]            # ★
-        record['loss'] = loss_total.item()
+            p = pred
+            if isinstance(crit, torch.nn.MSELoss):
+                K    = p.size(1)
+                y_oh = F.one_hot(labels, num_classes=K).float().to(p.device)
+                loss_total = crit(p, y_oh)
+            else:
+                loss_total = crit(p, labels)
 
+            record['prec1'] = accuracy(p, labels, (1,))[0]
+            record['prec5'] = accuracy(p, labels, (5,))[0]
+
+        record['loss'] = loss_total.item()
         # ---------- backward --------------------------------------
         if do_train:
             loss_total.backward()
