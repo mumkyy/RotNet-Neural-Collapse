@@ -20,7 +20,7 @@ data_test_opt['split'] = 'test'
 
 config['data_train_opt'] = data_train_opt
 config['data_test_opt']  = data_test_opt
-config['max_num_epochs'] = 100
+config['max_num_epochs'] = 200
 
 networks = {}
 feat_net_opt = {'num_classes': 4, 'num_stages': 4, 'use_avg_on_conv3': False}
