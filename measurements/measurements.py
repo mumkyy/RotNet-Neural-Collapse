@@ -120,7 +120,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
 
     N_per_class = torch.zeros(C, dtype=torch.long)
     sum_per_class: List[torch.Tensor] = []
-    Sw = torch.zeros(0)
+    # Sw = torch.zeros(0)
+    total_ss = 0.0
     loss_fn = nn.CrossEntropyLoss()
     total_loss = net_correct = NCC_match = 0
 
@@ -132,8 +133,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
         out = model(x)
         h   = feats['h'].view(len(x), -1)
 
-        if Sw.numel()==0:
-            Sw = torch.zeros(h.size(1), h.size(1))
+        # if Sw.numel()==0:
+        #     Sw = torch.zeros(h.size(1), h.size(1))
 
         total_loss += loss_fn(out, y).item() * len(x)
         net_correct += (out.argmax(1).cpu()==y.cpu()).sum().item()
@@ -164,8 +165,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
             if idx.numel():
                 hc = h[idx]
                 z  = hc - means[c]
-                Sw += (z.unsqueeze(2) @ z.unsqueeze(1)).sum(0)
-
+                # Sw += (z.unsqueeze(2) @ z.unsqueeze(1)).sum(0)
+                total_ss += (z.pow(2).sum(dim=1)).sum().item()
                 dists = torch.norm(hc.unsqueeze(1) - Mmat.T.unsqueeze(0), dim=2)
                 NCCp  = dists.argmin(dim=1)
                 netp  = out[idx].argmax(1).cpu()
@@ -175,7 +176,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
 
     # finalize
     N = N_per_class.sum().item()
-    Sw /= N
+    # Sw /= N
+    trace_Sw = total_ss / N
     loss = total_loss / N
     acc  = net_correct / N
     NCCm = 1 - NCC_match / N
@@ -187,7 +189,8 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: in
     # --- 1. compute Σ_b  (= between-class scatter) on GPU ----------
     Sb = (Mmat - muG) @ (Mmat - muG).T / C        # D×D torch tensor (GPU)
     # simple trace‐ratio NC1
-    trace_Sw = Sw.trace()                  # sum of diagonal of Sw
+    # trace_Sw = Sw.trace()                  # sum of diagonal of Sw
+    # simple trace‐ratio NC1: we already have trace_Sw = E[||x-μ_y||²]
     trace_Sb = Sb.trace()                  # sum of diagonal of Sb
     # guard tiny denominators
     eps = 1e-12
