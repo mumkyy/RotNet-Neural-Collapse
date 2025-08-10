@@ -104,7 +104,7 @@ class FeatureClassificationModel(Algorithm):
             p = pred
             if isinstance(crit, torch.nn.MSELoss):
                 K    = p.size(1)
-                y_oh = F.one_hot(labels, num_classes=K).float().to(p.device)
+                y_oh = F.one_hot(labels, num_classes=K).float().to(p.device) - 1.0 / K 
                 loss_total = crit(p, y_oh)
             else:
                 loss_total = crit(p, labels)
