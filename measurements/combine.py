@@ -1,9 +1,10 @@
-from measurements import Measurements
+#!/usr/bin/env python3
 from pathlib import Path
 import argparse
 import pickle
 import sys
 import matplotlib.pyplot as plt
+from measurements import Measurements  # regular import, as requested
 
 def parse_args():
     p = argparse.ArgumentParser("Compare two RotNet measurement runs")
@@ -16,8 +17,6 @@ def parse_args():
     p.add_argument('--label-a', default='Collapsed', help='Legend label for run A')
     p.add_argument('--label-b', default='Not Collapsed', help='Legend label for run B')
     return p.parse_args()
-
-
 
 def resolve_pkl(pathlike: str) -> Path:
     p = Path(pathlike)
@@ -35,7 +34,6 @@ def resolve_pkl(pathlike: str) -> Path:
 
 def main():
     args = parse_args()
-    ensure_measurements_import()
 
     out_dir = Path(args.out) / 'plots'
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -50,8 +48,8 @@ def main():
 
     epochsA = list(map(int, dataA['epochs']))
     epochsB = list(map(int, dataB['epochs']))
-    mA = dataA['metrics']  # Measurements instance
-    mB = dataB['metrics']
+    mA: Measurements = dataA['metrics']
+    mB: Measurements = dataB['metrics']
 
     # Align to common epochs
     common = sorted(set(epochsA).intersection(epochsB))
@@ -109,7 +107,7 @@ def main():
                 ylabel='NC3 (‖W/‖W‖ − M_c/‖M_c‖‖²)',
                 filename='nc3.pdf')
 
-    print("Done results have been effectively compiled into : ", out_dir)
+    print("✓  Done – results in", out_dir)
 
 if __name__ == "__main__":
     main()
