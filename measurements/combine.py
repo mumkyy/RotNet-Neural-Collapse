@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+from measurements import Measurements
 from pathlib import Path
 import argparse
 import pickle
@@ -17,21 +17,7 @@ def parse_args():
     p.add_argument('--label-b', default='Not Collapsed', help='Legend label for run B')
     return p.parse_args()
 
-# Ensure we can unpickle the Measurements class regardless of how measurements.py was run
-def ensure_measurements_import():
-    try:
-        from measurements.measurements import Measurements  # noqa: F401
-        return
-    except Exception:
-        try:
-            from measurements import Measurements  # noqa: F401
-            return
-        except Exception:
-            sys.exit(
-                "Could not import Measurements. Add your repo root to PYTHONPATH, e.g.\n"
-                "  export PYTHONPATH=$(pwd):$PYTHONPATH\n"
-                "and re-run."
-            )
+
 
 def resolve_pkl(pathlike: str) -> Path:
     p = Path(pathlike)
@@ -112,7 +98,7 @@ def main():
     plot_metric('trSwtrSb',
                 sel(mA.trSwtrSb, idxA),
                 sel(mB.trSwtrSb, idxB),
-                ylabel='tr(Sw)/tr(Sb)',
+                ylabel='NC1 tr(Sw)/tr(Sb)',
                 logy=True,
                 filename='trace_ratio_log.pdf')
 
@@ -123,7 +109,7 @@ def main():
                 ylabel='NC3 (‖W/‖W‖ − M_c/‖M_c‖‖²)',
                 filename='nc3.pdf')
 
-    print("✓  Done – results in", out_dir)
+    print("Done results have been effectively compiled into : ", out_dir)
 
 if __name__ == "__main__":
     main()
