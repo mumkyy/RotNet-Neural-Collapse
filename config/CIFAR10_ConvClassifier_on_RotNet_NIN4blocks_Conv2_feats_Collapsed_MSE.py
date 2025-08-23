@@ -35,7 +35,7 @@ config['out_feat_keys'] = ['conv2']
 config['networks'] = networks
 
 criterions = {}
-criterions['loss'] = {'ctype':'CrossEntropyLoss', 'opt':None}
+criterions['loss'] = {'ctype':'MSELoss', 'opt':None}
 config['criterions'] = criterions
 config['algorithm_type'] = 'FeatureClassificationModel'
 config['best_metric'] = 'prec1'
