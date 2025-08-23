@@ -75,6 +75,15 @@ class Classifier(nn.Module):
             self.classifier.add_module('Block3_ConvB4',  BasicBlock(256, 256, 1))
             self.classifier.add_module('GlobalAvgPool',  GlobalAvgPool())
             self.classifier.add_module('Liniear_F',      nn.Linear(256, num_classes))
+        elif self.cls_type == 'NIN_ConvBlock6':
+            self.classifier.add_module('Block3_ConvB1',  BasicBlock(nChannels, 512, 3))
+            self.classifier.add_module('Block3_ConvB2',  BasicBlock(512, 512, 3))
+            self.classifier.add_module('Block3_ConvB3',  BasicBlock(512, 512, 3))
+            self.classifier.add_module('Block3_ConvB4',  BasicBlock(512, 512, 1))
+            self.classifier.add_module('Block3_ConvB5',  BasicBlock(512, 512, 1))
+            self.classifier.add_module('Block3_ConvB6',  BasicBlock(512, 512, 1))
+            self.classifier.add_module('GlobalAvgPool',  GlobalAvgPool())
+            self.classifier.add_module('Liniear_F',      nn.Linear(512, num_classes))
         elif self.cls_type == 'Alexnet_conv5' or self.cls_type == 'Alexnet_conv4':
             if self.cls_type == 'Alexnet_conv4':
                 block5 = nn.Sequential(
