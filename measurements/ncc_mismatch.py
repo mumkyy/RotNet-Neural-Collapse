@@ -260,7 +260,7 @@ if __name__ == '__main__':
     plt.figure()
     plt.plot(range(len(xs)), ys, 'bx-')
     plt.xticks(range(len(xs)), xs, rotation=45, ha='right')
-    plt.ylabel('NCC mismatch (lower is better)')
+    plt.ylabel('NCC mismatch')
     plt.xlabel('Layer')
     plt.title(f'NCC mismatch across layers @ checkpoint {args.checkpoint}')
     plt.tight_layout()
