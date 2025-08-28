@@ -20,17 +20,17 @@ data_test_opt['split'] = 'test'
 
 config['data_train_opt'] = data_train_opt
 config['data_test_opt']  = data_test_opt
-config['max_num_epochs'] = 100
+config['max_num_epochs'] = 200
 
 networks = {}
 feat_net_opt = {'num_classes': 4, 'num_stages': 4, 'use_avg_on_conv3': False}
-feat_pretrained_file = './experiments/CIFAR10_RotNet_NIN4blocks_Collapsed_MSE/model_net_epoch200'
+feat_pretrained_file = './experiments/CIFAR10_RotNet_NIN4blocks_Not_Collapsed_MSE/model_net_epoch61'
 networks['feat_extractor'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretrained': feat_pretrained_file, 'opt': feat_net_opt,  'optim_params': None} 
 
 cls_net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(35, 0.1),(70, 0.02),(85, 0.004),(100, 0.0008)]}
-cls_net_opt = {'num_classes':10, 'nChannels':192, 'cls_type':'NIN_ConvBlock3'}
+cls_net_opt = {'num_classes':10, 'nChannels':192, 'cls_type':'NIN_ConvBlock4'}
 networks['classifier'] = {'def_file': 'architectures/NonLinearClassifier.py', 'pretrained': None, 'opt': cls_net_opt, 'optim_params': cls_net_optim_params}
-config['out_feat_keys'] = ['conv2']
+config['out_feat_keys'] = ['conv3']
 
 config['networks'] = networks
 
