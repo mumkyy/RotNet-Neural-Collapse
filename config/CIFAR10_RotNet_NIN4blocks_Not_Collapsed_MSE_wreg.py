@@ -33,8 +33,8 @@ networks['model'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretraine
 config['networks'] = networks
 
 config['nc_reg'] = {
-    'layers': ['conv4'],  # which layers to regularize
-    'weights': {'conv4':0.01},
+    'layers': ['conv4','conv3'],  # which layers to regularize
+    'weights': {'conv4':0.01,'conv3':0.01},
     'detach_sb': True           # stop grads through Sb to avoid shrinking class means
 }
 
