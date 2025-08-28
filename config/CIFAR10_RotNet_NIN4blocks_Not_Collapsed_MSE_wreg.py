@@ -34,7 +34,7 @@ config['networks'] = networks
 
 config['nc_reg'] = {
     'layers': ['conv4'],  # which layers to regularize
-    'weights': {'conv4':0.1},
+    'weights': {'conv4':0.01},
     'detach_sb': True           # stop grads through Sb to avoid shrinking class means
 }
 

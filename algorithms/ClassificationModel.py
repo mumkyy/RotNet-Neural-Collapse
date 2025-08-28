@@ -115,7 +115,7 @@ class ClassificationModel(Algorithm):
                         Sw = Sw + ((zc - mu_c)**2).sum()
                         Sb = Sb + zc.size(0) * ((mu_c - mu)**2).sum()
 
-                    nc1 = Sw / (Sb.detach() + 1e-6)      # ← prevent Sb-shrink “cheat”
+                    nc1 = torch.clamp(Sw / (Sb.detach() + 1e-6), min=1e-3)
                     penalty = -torch.log(nc1 + 1e-6)
                     w = self.opt['nc_reg']['weights'][layer]
                     loss_total = loss_total + w * penalty
