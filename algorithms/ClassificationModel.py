@@ -36,6 +36,14 @@ def accuracy(output, target, topk=(1,)):
 class ClassificationModel(Algorithm):
     def __init__(self, opt):
         Algorithm.__init__(self, opt)
+        self.feats = {}
+        if 'nc_reg' in opt:
+            for layer in opt['nc_reg']['layers']:
+                idx = self.networks['model'].all_feat_names.index(layer)
+                block = self.networks['model']._feature_blocks[idx]
+                block.register_forward_hook(lambda m,i,o, name=layer:
+                                            self.feats.__setitem__(name, o.view(o.size(0),-1)))
+
 
     def allocate_tensors(self):
         self.tensors = {}
@@ -73,15 +81,45 @@ class ClassificationModel(Algorithm):
         pred_var = self.networks['model'](dataX_var)
         #********************************************************
 
+        C = pred_var.size(1)
+    
         #*************** COMPUTE LOSSES *************************
         crit = self.criterions['loss']
         if isinstance(crit, nn.MSELoss):
             # one-hot encode targets for MSE
-            C = pred_var.size(1)
             y_oh = F.one_hot(labels_var, num_classes=C).float().to(pred_var.device)
             loss_total = crit(pred_var, y_oh)
         else:
             loss_total = crit(pred_var, labels_var)
+
+        # --- NC1 penalty (safe, simplest) ---
+        if do_train and ('nc_reg' in self.opt):
+            # optional warmup: enable after N epochs
+            warm = self.opt['nc_reg'].get('warmup_epochs', 0)
+            if self.curr_epoch >= warm:
+                for layer in self.opt['nc_reg']['layers']:
+                    z = self.feats.get(layer, None)
+                    if z is None:       # hook hasn’t fired for some reason
+                        continue
+                    z = z.float()        # AMP stability
+
+                    mu = z.mean(0)
+                    Sw = z.new_tensor(0.0)
+                    Sb = z.new_tensor(0.0)
+                    for c in range(C):
+                        mask = (labels_var == c)
+                        if mask.sum() < 2:
+                            continue
+                        zc = z[mask]
+                        mu_c = zc.mean(0)
+                        Sw = Sw + ((zc - mu_c)**2).sum()
+                        Sb = Sb + zc.size(0) * ((mu_c - mu)**2).sum()
+
+                    nc1 = Sw / (Sb.detach() + 1e-6)      # ← prevent Sb-shrink “cheat”
+                    penalty = -torch.log(nc1 + 1e-6)
+                    w = self.opt['nc_reg']['weights'][layer]
+                    loss_total = loss_total + w * penalty
+
 
         record = {}
         # precision still computed on raw logits
