@@ -2,3 +2,4 @@ experiments
 datasets
 *~
 *.pyc
+results
