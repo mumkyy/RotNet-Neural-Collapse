@@ -1,0 +1,6 @@
+NC1 metrics for checkpoint 200
+conv1: 282.283386
+conv2: 561.848816
+conv3: 681.536560
+conv4: 454.618958
+classifier: 0.034058
