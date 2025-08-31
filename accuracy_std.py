@@ -66,7 +66,7 @@ def main():
     )
     parser.add_argument(
         "--pattern", "-p",
-        default="*.log",
+        default="*.txt",
         help="Glob pattern to match log files within a directory (default: *.log)."
     )
     parser.add_argument(
