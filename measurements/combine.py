@@ -93,20 +93,49 @@ def main():
                 ylabel='Training Accuracy (%)',
                 filename='training_accuracy.pdf')
 
-    # 3) tr(Sw)/tr(Sb) (log-scale)
-    plot_metric('trSwtrSb',
+    # 3) NC1 (log-scale)
+    plot_metric('nc1',
                 sel(mA.trSwtrSb, idxA),
                 sel(mB.trSwtrSb, idxB),
-                ylabel='NC1 tr(Sw)/tr(Sb)',
+                ylabel='NC1',
                 logy=True,
-                filename='trace_ratio_log.pdf')
+                filename='nc1.pdf')
 
-    # 4) NC-3 (W_M_dist) (linear)
-    plot_metric('W_M_dist',
+    # 4) NC3 (linear)
+    plot_metric('nc3',
                 sel(mA.W_M_dist, idxA),
                 sel(mB.W_M_dist, idxB),
-                ylabel='NC3 (‖W/‖W‖ − M_c/‖M_c‖‖²)',
+                ylabel='NC3',
                 filename='nc3.pdf')
+
+    # 5) Combined NC1 and NC3 subplot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # NC1 plot (log scale)
+    nc1_A = sel(mA.trSwtrSb, idxA)
+    nc1_B = sel(mB.trSwtrSb, idxB)
+    ax1.semilogy(common, nc1_A, 'bx-', label=args.label_a)
+    ax1.semilogy(common, nc1_B, 'ro-', label=args.label_b)
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('NC1')
+    ax1.set_title('NC1 vs Epoch')
+    ax1.legend()
+    ax1.grid(True, alpha=0.6)
+    
+    # NC3 plot (linear scale)
+    nc3_A = sel(mA.W_M_dist, idxA)
+    nc3_B = sel(mB.W_M_dist, idxB)
+    ax2.plot(common, nc3_A, 'bx-', label=args.label_a)
+    ax2.plot(common, nc3_B, 'ro-', label=args.label_b)
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('NC3')
+    ax2.set_title('NC3 vs Epoch')
+    ax2.legend()
+    ax2.grid(True, alpha=0.6)
+    
+    plt.tight_layout()
+    plt.savefig(out_dir / 'nc1_nc3_comparison.pdf')
+    plt.close()
 
     print("✓  Done – results in", out_dir)
 
