@@ -39,12 +39,17 @@ def main():
         dataset_name=data_train_opt['dataset_name'],
         split=data_train_opt['split'],
         random_sized_crop=data_train_opt['random_sized_crop'],
-        num_imgs_per_cat=num_imgs_per_cat)
+        num_imgs_per_cat=num_imgs_per_cat,
+        pretext_mode=data_train_opt['pretext_mode'],
+        noise_sigmas=data_train_opt.get('noise_sigmas'))
+    
     dataset_test = GenericDataset(
         dataset_name=data_test_opt['dataset_name'],
         split=data_test_opt['split'],
-        random_sized_crop=data_test_opt['random_sized_crop'])
-
+        random_sized_crop=data_test_opt['random_sized_crop'],
+        pretext_mode=data_train_opt['pretext_mode'],
+        noise_sigmas=data_train_opt.get('noise_sigmas'))
+        
     dloader_train = DataLoader(
         dataset=dataset_train,
         batch_size=data_train_opt['batch_size'],

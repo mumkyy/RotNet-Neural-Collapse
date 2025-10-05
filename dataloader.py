@@ -74,11 +74,13 @@ class Places205(data.Dataset):
 
 class GenericDataset(data.Dataset):
     def __init__(self, dataset_name, split, random_sized_crop=False,
-                 num_imgs_per_cat=None):
+                 num_imgs_per_cat=None, pretext_mode='rotation', noise_sigmas=None):
         self.split = split.lower()
         self.dataset_name =  dataset_name.lower()
         self.name = self.dataset_name + '_' + self.split
         self.random_sized_crop = random_sized_crop
+        self.pretext_mode = pretext_mode
+        self.noise_sigmas = noise_sigmas
 
         # The num_imgs_per_cats input argument specifies the number
         # of training examples per category that would be used.
@@ -225,6 +227,12 @@ def rotate_img(img, rot):
     else:
         raise ValueError('rotation should be 0, 90, 180, or 270 degrees')
 
+def add_gaussian_noise(img, sigma):
+    #Apply zero-mean Gaussian noise with std `sigma` to an HxWxC numpy image
+    x = img.astype(np.float32) / 255.0
+    noise = np.random.normal(0.0, float(sigma), size=x.shape).astype(np.float32)
+    x = np.clip(x + noise, 0.0, 1.0)
+    return (x * 255.0).round().astype(np.uint8)
 
 class DataLoader(object):
     def __init__(self,
@@ -240,6 +248,9 @@ class DataLoader(object):
         self.batch_size = batch_size
         self.unsupervised = unsupervised
         self.num_workers = num_workers
+
+        self.pretext_mode = getattr(self.dataset, 'pretext_mode', 'rotation')
+        self.noise_sigmas = list(getattr(self.dataset, 'noise_sigmas', [1e-3, 1e-2, 1e-1, 1.0]))
 
         mean_pix  = self.dataset.mean_pix
         std_pix   = self.dataset.std_pix
@@ -264,6 +275,14 @@ class DataLoader(object):
             def _load_function(idx):
                 idx = idx % len(self.dataset)
                 img0, _ = self.dataset[idx]
+                mode = getattr(self.dataset, 'pretext_mode', self.pretext_mode)
+
+                if mode == 'gaussian_noise':
+                    sigmas = list(getattr(self.dataset, 'noise_sigmas', self.noise_sigmas))
+                    noisy_imgs = [self.transform(add_gaussian_noise(img0, s)) for s in sigmas]
+                    labels = torch.arange(len(noisy_imgs), dtype=torch.long)
+                    return torch.stack(noisy_imgs, dim=0), labels
+            
                 rotated_imgs = [
                     self.transform(img0),
                     self.transform(rotate_img(img0,  90)),
@@ -272,6 +291,7 @@ class DataLoader(object):
                 ]
                 rotation_labels = torch.LongTensor([0, 1, 2, 3])
                 return torch.stack(rotated_imgs, dim=0), rotation_labels
+            
             def _collate_fun(batch):
                 batch = default_collate(batch)
                 assert(len(batch)==2)
