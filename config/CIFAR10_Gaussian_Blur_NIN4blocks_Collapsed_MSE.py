@@ -10,7 +10,7 @@ data_train_opt['random_sized_crop'] = False
 data_train_opt['dataset_name'] = 'cifar10'
 data_train_opt['split'] = 'train'
 data_train_opt['pretext_mode'] = 'gaussian_blur'
-data_train_opt['sigmas'] = [0, 1e-1, 1e-2, 1e-3]
+data_train_opt['sigmas'] = [0, 0.1, 0.15, 0.2]
 
 data_test_opt = {}
 data_test_opt['batch_size'] = batch_size
@@ -20,7 +20,7 @@ data_test_opt['random_sized_crop'] = False
 data_test_opt['dataset_name'] = 'cifar10'
 data_test_opt['split'] = 'test'
 data_test_opt['pretext_mode'] = 'gaussian_blur'
-data_test_opt['sigmas'] = [0, 1e-1, 1e-2, 1e-3]
+data_test_opt['sigmas'] = [0, 0.1, 0.15, 0.2]
 
 config['data_train_opt'] = data_train_opt
 config['data_test_opt']  = data_test_opt
