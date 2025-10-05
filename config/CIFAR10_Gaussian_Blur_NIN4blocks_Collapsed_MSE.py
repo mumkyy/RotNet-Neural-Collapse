@@ -9,8 +9,8 @@ data_train_opt['epoch_size'] = None
 data_train_opt['random_sized_crop'] = False
 data_train_opt['dataset_name'] = 'cifar10'
 data_train_opt['split'] = 'train'
-data_train_opt['pretext_mode'] = 'gaussian_noise'
-data_train_opt['noise_sigmas'] = [1e-3, 1e-2, 1e-1, 1]
+data_train_opt['pretext_mode'] = 'gaussian_blur'
+data_train_opt['sigmas'] = [0, 0.6, 0.9, 1.2]
 
 data_test_opt = {}
 data_test_opt['batch_size'] = batch_size
@@ -19,8 +19,8 @@ data_test_opt['epoch_size'] = None
 data_test_opt['random_sized_crop'] = False
 data_test_opt['dataset_name'] = 'cifar10'
 data_test_opt['split'] = 'test'
-data_test_opt['pretext_mode'] = 'gaussian_noise'
-data_test_opt['noise_sigmas'] = [1e-3, 1e-2, 1e-1, 1]
+data_test_opt['pretext_mode'] = 'gaussian_blur'
+data_test_opt['sigmas'] = [0, 0.6, 0.9, 1.2]
 
 config['data_train_opt'] = data_train_opt
 config['data_test_opt']  = data_test_opt
@@ -35,12 +35,6 @@ networks = {}
 net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 0, 'nesterov': True, 'LUT_lr':[(60, 0.1),(120, 0.02),(160, 0.004),(200, 0.0008)]}
 networks['model'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params} 
 config['networks'] = networks
-
-config['nc_reg'] = {
-    'layers': ['conv4','conv3','conv2'],  # which layers to regularize
-    'weights': {'conv4':0.01,'conv3':0.01, 'conv2': 0.01},
-    'detach_sb': True           # stop grads through Sb to avoid shrinking class means
-}
 
 criterions = {}
 criterions['loss'] = {'ctype':'MSELoss', 'opt':None}

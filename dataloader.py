@@ -15,6 +15,7 @@ import errno
 import numpy as np
 import sys
 import csv
+import scipy.ndimage
 
 from pdb import set_trace as breakpoint
 
@@ -74,13 +75,13 @@ class Places205(data.Dataset):
 
 class GenericDataset(data.Dataset):
     def __init__(self, dataset_name, split, random_sized_crop=False,
-                 num_imgs_per_cat=None, pretext_mode='rotation', noise_sigmas=None):
+                 num_imgs_per_cat=None, pretext_mode='rotation', sigmas=None):
         self.split = split.lower()
         self.dataset_name =  dataset_name.lower()
         self.name = self.dataset_name + '_' + self.split
         self.random_sized_crop = random_sized_crop
         self.pretext_mode = pretext_mode
-        self.noise_sigmas = noise_sigmas
+        self.sigmas = sigmas
 
         # The num_imgs_per_cats input argument specifies the number
         # of training examples per category that would be used.
@@ -234,6 +235,11 @@ def add_gaussian_noise(img, sigma):
     x = np.clip(x + noise, 0.0, 1.0)
     return (x * 255.0).round().astype(np.uint8)
 
+def apply_gaussian_blur(img, sigma):
+    #Return img blurred with std `sigma` (expects HxWxC uint8)
+    x = scipy.ndimage.gaussian_filter(img.astype(np.float32), sigma=(sigma, sigma, 0))
+    return np.clip(x, 0, 255).astype(np.uint8)
+
 class DataLoader(object):
     def __init__(self,
                  dataset,
@@ -250,7 +256,7 @@ class DataLoader(object):
         self.num_workers = num_workers
 
         self.pretext_mode = getattr(self.dataset, 'pretext_mode', 'rotation')
-        self.noise_sigmas = list(getattr(self.dataset, 'noise_sigmas', [1e-3, 1e-2, 1e-1, 1.0]))
+        self.sigmas = list(getattr(self.dataset, 'sigmas', [1e-3, 1e-2, 1e-1, 1.0]))
 
         mean_pix  = self.dataset.mean_pix
         std_pix   = self.dataset.std_pix
@@ -278,11 +284,17 @@ class DataLoader(object):
                 mode = getattr(self.dataset, 'pretext_mode', self.pretext_mode)
 
                 if mode == 'gaussian_noise':
-                    sigmas = list(getattr(self.dataset, 'noise_sigmas', self.noise_sigmas))
+                    sigmas = list(getattr(self.dataset, 'sigmas', self.sigmas))
                     noisy_imgs = [self.transform(add_gaussian_noise(img0, s)) for s in sigmas]
                     labels = torch.arange(len(noisy_imgs), dtype=torch.long)
                     return torch.stack(noisy_imgs, dim=0), labels
             
+                if mode == 'gaussian_blur':
+                    sigmas = list(getattr(self.dataset, 'sigmas', self.sigmas))
+                    blurred = [self.transform(apply_gaussian_blur(img0, s)) for s in sigmas]
+                    labels = torch.arange(len(blurred), dtype=torch.long)
+                    return torch.stack(blurred, 0), labels
+
                 rotated_imgs = [
                     self.transform(img0),
                     self.transform(rotate_img(img0,  90)),
