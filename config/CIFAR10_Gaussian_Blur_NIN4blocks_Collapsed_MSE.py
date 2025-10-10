@@ -20,7 +20,7 @@ data_test_opt['random_sized_crop'] = False
 data_test_opt['dataset_name'] = 'cifar10'
 data_test_opt['split'] = 'test'
 data_test_opt['pretext_mode'] = 'gaussian_blur'
-data_test_opt['kernel_sizes'] = [0, 3, 5, 7]
+data_test_opt['kernel_sizes'] = [1, 3, 5, 7]
 
 config['data_train_opt'] = data_train_opt
 config['data_test_opt']  = data_test_opt
