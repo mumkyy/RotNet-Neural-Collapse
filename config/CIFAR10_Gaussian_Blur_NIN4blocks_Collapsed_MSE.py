@@ -10,7 +10,7 @@ data_train_opt['random_sized_crop'] = False
 data_train_opt['dataset_name'] = 'cifar10'
 data_train_opt['split'] = 'train'
 data_train_opt['pretext_mode'] = 'gaussian_blur'
-data_train_opt['kernel_sizes'] = [0, 3, 5, 7]
+data_train_opt['kernel_sizes'] = [1, 3, 5, 7]
 
 data_test_opt = {}
 data_test_opt['batch_size'] = batch_size
