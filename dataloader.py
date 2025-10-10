@@ -5,6 +5,8 @@ import torchvision
 import torchnet as tnt
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
+
 # from Places205 import Places205
 import numpy as np
 import random
@@ -15,7 +17,6 @@ import errno
 import numpy as np
 import sys
 import csv
-import scipy.ndimage
 
 from pdb import set_trace as breakpoint
 
@@ -75,13 +76,14 @@ class Places205(data.Dataset):
 
 class GenericDataset(data.Dataset):
     def __init__(self, dataset_name, split, random_sized_crop=False,
-                 num_imgs_per_cat=None, pretext_mode='rotation', sigmas=None):
+                 num_imgs_per_cat=None, pretext_mode='rotation', sigmas=None, kernel_sizes=None):
         self.split = split.lower()
         self.dataset_name =  dataset_name.lower()
         self.name = self.dataset_name + '_' + self.split
         self.random_sized_crop = random_sized_crop
         self.pretext_mode = pretext_mode
         self.sigmas = sigmas
+        self.kernel_sizes = kernel_sizes
 
         # The num_imgs_per_cats input argument specifies the number
         # of training examples per category that would be used.
@@ -235,10 +237,11 @@ def add_gaussian_noise(img, sigma):
     x = np.clip(x + noise, 0.0, 1.0)
     return (x * 255.0).round().astype(np.uint8)
 
-def apply_gaussian_blur(img, sigma):
+def apply_gaussian_blur(img, sigma=1.0, kernel_size=5):
     #Return img blurred with std `sigma` (expects HxWxC uint8)
-    x = scipy.ndimage.gaussian_filter(img.astype(np.float32), sigma=(sigma, sigma, 0))
-    return np.clip(x, 0, 255).astype(np.uint8)
+    img_pil = Image.fromarray(img)
+    blurred = blurred_img = F.gaussian_blur(img_pil, kernel_size=kernel_size, sigma=sigma)
+    return np.array(blurred_img)
 
 class DataLoader(object):
     def __init__(self,
@@ -290,8 +293,8 @@ class DataLoader(object):
                     return torch.stack(noisy_imgs, dim=0), labels
             
                 if mode == 'gaussian_blur':
-                    sigmas = list(getattr(self.dataset, 'sigmas', self.sigmas))
-                    blurred = [self.transform(apply_gaussian_blur(img0, s)) for s in sigmas]
+                    kernel_sizes = list(getattr(self.dataset, 'kernel_sizes', [3, 5, 7, 9]))
+                    blurred = [self.transform(apply_gaussian_blur(img0, kernel_size=k)) for k in kernel_sizes]
                     labels = torch.arange(len(blurred), dtype=torch.long)
                     return torch.stack(blurred, 0), labels
 
