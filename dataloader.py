@@ -259,7 +259,6 @@ class DataLoader(object):
         self.num_workers = num_workers
 
         self.pretext_mode = getattr(self.dataset, 'pretext_mode', 'rotation')
-        self.sigmas = list(getattr(self.dataset, 'sigmas', [1e-3, 1e-2, 1e-1, 1.0]))
 
         mean_pix  = self.dataset.mean_pix
         std_pix   = self.dataset.std_pix
@@ -287,7 +286,7 @@ class DataLoader(object):
                 mode = getattr(self.dataset, 'pretext_mode', self.pretext_mode)
 
                 if mode == 'gaussian_noise':
-                    sigmas = list(getattr(self.dataset, 'sigmas', self.sigmas))
+                    sigmas = list(getattr(self.dataset, 'sigmas', [1e-3, 1e-2, 1e-1, 1.0]))
                     noisy_imgs = [self.transform(add_gaussian_noise(img0, s)) for s in sigmas]
                     labels = torch.arange(len(noisy_imgs), dtype=torch.long)
                     return torch.stack(noisy_imgs, dim=0), labels
