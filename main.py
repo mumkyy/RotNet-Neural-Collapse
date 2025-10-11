@@ -39,18 +39,22 @@ def main():
         dataset_name=data_train_opt['dataset_name'],
         split=data_train_opt['split'],
         random_sized_crop=data_train_opt['random_sized_crop'],
-        num_imgs_per_cat=num_imgs_per_cat,
-        pretext_mode=data_train_opt['pretext_mode'],
-        sigmas=data_train_opt.get('sigmas'),
-        kernel_sizes=data_train_opt.get('kernel_sizes'))
+        num_imgs_per_cat=num_imgs_per_cat)
     
     dataset_test = GenericDataset(
         dataset_name=data_test_opt['dataset_name'],
         split=data_test_opt['split'],
-        random_sized_crop=data_test_opt['random_sized_crop'],
-        pretext_mode=data_train_opt['pretext_mode'],
-        sigmas=data_train_opt.get('sigmas'),
-        kernel_sizes=data_test_opt.get('kernel_sizes'))
+        random_sized_crop=data_test_opt['random_sized_crop'])
+    
+    # Set pretext parameters only for unsupervised (backbone training)
+    if data_train_opt['unsupervised']:
+        dataset_train.pretext_mode = data_train_opt.get('pretext_mode', 'rotation')
+        dataset_train.sigmas = data_train_opt.get('sigmas')
+        dataset_train.kernel_sizes = data_train_opt.get('kernel_sizes')
+        
+        dataset_test.pretext_mode = data_test_opt.get('pretext_mode', 'rotation')
+        dataset_test.sigmas = data_test_opt.get('sigmas')
+        dataset_test.kernel_sizes = data_test_opt.get('kernel_sizes')
         
     dloader_train = DataLoader(
         dataset=dataset_train,
