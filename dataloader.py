@@ -102,21 +102,21 @@ class GenericDataset(data.Dataset):
                 transforms_list = [
                     transforms.Resize(256),
                     transforms.CenterCrop(224),
-                    lambda x: np.asarray(x),
+                    lambda x: np.asarray(x).copy(),
                 ]
             else:
                 if self.random_sized_crop:
                     transforms_list = [
                         transforms.RandomResizedCrop(224),
                         transforms.RandomHorizontalFlip(),
-                        lambda x: np.asarray(x),
+                        lambda x: np.asarray(x).copy(),
                     ]
                 else:
                     transforms_list = [
                         transforms.Resize(256),
                         transforms.RandomCrop(224),
                         transforms.RandomHorizontalFlip(),
-                        lambda x: np.asarray(x),
+                        lambda x: np.asarray(x).copy(),
                     ]
             self.transform = transforms.Compose(transforms_list)
             split_data_dir = _IMAGENET_DATASET_DIR + '/' + self.split
@@ -127,20 +127,20 @@ class GenericDataset(data.Dataset):
             if self.split!='train':
                 transforms_list = [
                     transforms.CenterCrop(224),
-                    lambda x: np.asarray(x),
+                    lambda x: np.asarray(x).copy(),
                 ]
             else:
                 if self.random_sized_crop:
                     transforms_list = [
                         transforms.RandomResizedCrop(224),
                         transforms.RandomHorizontalFlip(),
-                        lambda x: np.asarray(x),
+                        lambda x: np.asarray(x).copy(),
                     ]
                 else:
                     transforms_list = [
                         transforms.RandomCrop(224),
                         transforms.RandomHorizontalFlip(),
-                        lambda x: np.asarray(x),
+                        lambda x: np.asarray(x).copy(),
                     ]
             self.transform = transforms.Compose(transforms_list)
             self.data = Places205(root=_PLACES205_DATASET_DIR, split=self.split,
@@ -156,7 +156,7 @@ class GenericDataset(data.Dataset):
             if (split != 'test'):
                 transform.append(transforms.RandomCrop(32, padding=4))
                 transform.append(transforms.RandomHorizontalFlip())
-            transform.append(lambda x: np.asarray(x))
+            transform.append(lambda x: np.asarray(x).copy())
             self.transform = transforms.Compose(transform)
             self.data = datasets.__dict__[self.dataset_name.upper()](
                 _CIFAR_DATASET_DIR, train=self.split=='train',
