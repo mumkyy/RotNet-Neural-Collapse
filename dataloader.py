@@ -235,13 +235,13 @@ def add_gaussian_noise(img, sigma):
     x = img.astype(np.float32) / 255.0
     noise = np.random.normal(0.0, float(sigma), size=x.shape).astype(np.float32)
     x = np.clip(x + noise, 0.0, 1.0)
-    return (x * 255.0).round().astype(np.uint8)
+    return (x * 255.0).round().astype(np.uint8).copy()
 
 def apply_gaussian_blur(img, sigma=1.0, kernel_size=5):
     #Return img blurred with std `sigma` (expects HxWxC uint8)
     img_pil = Image.fromarray(img)
     blurred = blurred_img = F.gaussian_blur(img_pil, kernel_size=kernel_size, sigma=sigma)
-    return np.array(blurred_img)
+    return np.array(blurred_img).copy()
 
 class DataLoader(object):
     def __init__(self,
