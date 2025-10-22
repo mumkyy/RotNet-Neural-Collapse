@@ -32,7 +32,7 @@ KERNEL_SETS=(
 for i in "${!KERNEL_SETS[@]}"; do
   ks="${KERNEL_SETS[$i]}"
   OUT="config/testkernels/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}.py"
-  EXP_NAME="CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}"
+  EXP_NAME="testkernels/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}"
 
   cp -p "$BASE" "$OUT"
 
