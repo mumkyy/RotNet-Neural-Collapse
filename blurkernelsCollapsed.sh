@@ -3,10 +3,10 @@
 BASE="CIFAR10/gaussian/blur/"
 CONFIG="config/CIFAR10/gaussian/blur/backbone/"
 
-for file in "${CONFIG}*"; do 
-    fileBase=$(echo "$file" | sed '/s/.py//' )
+for file in ${CONFIG}*.py; do 
+    fileBase=$(basename "$file" | sed s/.py// )
     BACK="${BASE}backbone/${fileBase}"
-    KS_TAG=$(echo "$fileBase" | sed '/s/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_//')
+    KS_TAG=$(echo "$fileBase" | sed 's/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_//')
     DOWN4="${BASE}conv4/CIFAR10_ConvClassifier_Gaussian_Blur_NIN4blocks_Conv4_feats_Collapsed_${KS_TAG}"
     DOWN2="${BASE}conv2/CIFAR10_ConvClassifier_Gaussian_Blur_NIN4blocks_Conv2_feats_Collapsed_${KS_TAG}"
 
