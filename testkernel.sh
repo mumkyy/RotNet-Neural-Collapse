@@ -7,7 +7,7 @@ mkdir -p testkernels
 
 cd ..
 
-BASE="CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE.py"
+BASE="config/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE.py"
 
 
 KERNEL_SETS=(
@@ -46,5 +46,5 @@ for i in "${!KERNEL_SETS[@]}"; do
   
   KS_TAG=$(echo "$ks" | tr -d '[] ' | tr ',' '_')
 
-  sbatch --job-name "gpu_coll_gauss_blur_kernel_test_${KS_TAG}" --export=ALL,EXP_NAME="$EXP_NAME",KS_TAG="$KS_TAG" ../submit.sh
+  sbatch --job-name="gpu_coll_gauss_blur_kernel_test_${KS_TAG}" --export=ALL,EXP_NAME="$EXP_NAME",KS_TAG="$KS_TAG" ./submit.sh
 done
