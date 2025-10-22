@@ -31,7 +31,7 @@ KERNEL_SETS=(
 for i in "${!KERNEL_SETS[@]}"; do
   ks="${KERNEL_SETS[$i]}"
   OUT="testkernels/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}.py"
-
+  EXP_NAME="CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}"
 
   cp -p "$BASE" "$OUT"
 
@@ -46,5 +46,5 @@ for i in "${!KERNEL_SETS[@]}"; do
   KS_TAG=$(echo "$ks" | tr -d '[] ' | tr ',' '_')
 
 
-  sbatch --export=ALL,CFG_PATH="$PWD/$OUT",KS_TAG="$KS_TAG" ../submit.sh
+  sbatch --export=ALL,EXP_NAME="$EXP_NAME",KS_TAG="$KS_TAG" ../submit.sh
 done
