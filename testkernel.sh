@@ -5,6 +5,7 @@ cd config
 
 mkdir -p testkernels
 
+cd ..
 
 BASE="CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE.py"
 
@@ -30,7 +31,7 @@ KERNEL_SETS=(
 # Loop through and create 5 config copies
 for i in "${!KERNEL_SETS[@]}"; do
   ks="${KERNEL_SETS[$i]}"
-  OUT="testkernels/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}.py"
+  OUT="config/testkernels/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}.py"
   EXP_NAME="CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE_${i}"
 
   cp -p "$BASE" "$OUT"
@@ -45,6 +46,5 @@ for i in "${!KERNEL_SETS[@]}"; do
   
   KS_TAG=$(echo "$ks" | tr -d '[] ' | tr ',' '_')
 
-
-  sbatch --export=ALL,EXP_NAME="$EXP_NAME",KS_TAG="$KS_TAG" ../submit.sh
+  sbatch --job-name "gpu_coll_gauss_blur_kernel_test_${KS_TAG}" --export=ALL,EXP_NAME="$EXP_NAME",KS_TAG="$KS_TAG" ../submit.sh
 done
