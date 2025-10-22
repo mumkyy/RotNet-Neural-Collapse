@@ -8,7 +8,6 @@ cd ..
 
 BASE="config/CIFAR10_Gaussian_Blur_NIN4blocks_Collapsed_MSE.py"
 DOWN4="config/CIFAR10_ConvClassifier_Gaussian_Blur_NIN4blocks_Conv4_feats_Collapsed.py"
-DOWN2="config/CIFAR10_ConvClassifier_Gaussian_Blur_NIN4blocks_Conv2_feats_Collapsed.py"
 
 odds=(1 3 5 7 9 11 15)
 KERNEL_SETS=()
@@ -48,10 +47,6 @@ for i in "${!KERNEL_SETS[@]}"; do
   cp -p "$DOWN4" "$DOWN4_OUT"
 
   sed -E -i \
-    "s|(^[[:space:]]*config\['out_feat_keys'\][[:space:]]*=[[:space:]])\[[^]]*\]|\1\['conv4'\]|;" \
-    "$DOWN4_OUT"
-
-  sed -E -i \
     "s|(^[[:space:]]*feat_pretrained_file[[:space:]]*=[[:space:]])['\"][^'\"]*['\"]|\1'./experiments/${BASE_EXP}/model_net_epoch200'|;" \
     "$DOWN4_OUT"
 
@@ -61,7 +56,7 @@ for i in "${!KERNEL_SETS[@]}"; do
   DOWN2_OUT="config/testkernels/CIFAR10_ConvClassifier_Gaussian_Blur_NIN4blocks_Conv2_feats_Collapsed_${KS_TAG}.py"
   DOWN2_EXP="testkernels/CIFAR10_ConvClassifier_Gaussian_Blur_NIN4blocks_Conv2_feats_Collapsed_${KS_TAG}"
 
-  cp -p "$DOWN2" "$DOWN2_OUT"
+  cp -p "$DOWN4" "$DOWN2_OUT"
 
   sed -E -i \
     "s|(^[[:space:]]*config\['out_feat_keys'\][[:space:]]*=[[:space:]])\[[^]]*\]|\1\['conv2'\]|;" \
