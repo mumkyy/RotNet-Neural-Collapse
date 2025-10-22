@@ -3,6 +3,7 @@ import re
 import argparse
 from pathlib import Path
 from statistics import mean, stdev
+from collections import defaultdict
 
 def parse_log(path):
     train_acc  = []  # list of (epoch, prec1)
@@ -49,12 +50,19 @@ def report_file(path):
 
 def summarize(values, label):
     if not values:
-        print(f"No {label} values found across files.")
+        print(f"No {label} values found.")
         return
     if len(values) == 1:
-        print(f"{label}: mean = {values[0]:.4f}%, stdev = 0.0000% (only one file)")
+        print(f"{label}: {values[0]:.4f}% (only one file)")
     else:
         print(f"{label}: mean = {mean(values):.4f}%, stdev = {stdev(values):.4f}%")
+
+def detect_category(categories, path: Path) -> str:
+    s = str(path).lower()
+    for x in categories:
+        if x in s:
+            return x
+    return "other"
 
 def main():
     parser = argparse.ArgumentParser(
@@ -82,7 +90,14 @@ def main():
     parser.add_argument(
         "--mean-stdev",
         action="store_true",
-        help="report mean and stdev"
+        help="Report mean and stdev across all files (assumes same experiment repeated)"
+    )
+    parser.add_argument(
+        "--categories", "-c",
+        nargs="+",             
+        default=None,           
+        help="Category keywords to group by (e.g. --categories NIN4blocks conv2 conv4). "
+            "Shows best performer in each category."
     )
     args = parser.parse_args()
 
@@ -102,16 +117,15 @@ def main():
         print("No log files matched.")
         return
 
-    per_file_train = []
-    per_file_val   = []
+    # Always list best-per-file first (unless quiet), and cache results
+    per_file_results = {}
+    for f in files:
+        per_file_results[f] = report_file(f)
 
     if not args.quiet:
         print(f"Found {len(files)} file(s). Reporting best per file:\n")
-
-    for f in files:
-        best_train, best_val = report_file(f)
-
-        if not args.quiet:
+        for f in files:
+            best_train, best_val = per_file_results[f]
             print(f"[{f}]")
             if best_train:
                 tepoch, tacc = best_train
@@ -125,15 +139,67 @@ def main():
                 print("  No validation entries found.")
             print()
 
-        if best_train:
-            per_file_train.append(best_train[1])
-        if best_val:
-            per_file_val.append(best_val[1])
-
-    if args.mean_stdev:
-        print("Aggregate across files:")
+    # Decide mode: category grouping or mean/stdev aggregation
+    if args.categories:
+        # Category mode: group files by category and show best in each
+        categories_lower = [c.lower() for c in args.categories]
+        category_results = defaultdict(list)  # category -> [(file, best_train, best_val)]
+        
+        for f in files:
+            cat = detect_category(categories_lower, f)
+            if cat != "other":
+                best_train, best_val = per_file_results[f]
+                category_results[cat].append((f, best_train, best_val))
+        
+        if not category_results:
+            print("No files matched any category.")
+            return
+        
+        print(f"Found {sum(len(v) for v in category_results.values())} file(s) across {len(category_results)} categories.\n")
+        
+        for cat in categories_lower:
+            if cat not in category_results:
+                continue
+            
+            results = category_results[cat]
+            print(f"=== Category: {cat} ({len(results)} files) ===")
+            
+            # Find best by validation accuracy
+            best_file = None
+            best_val_acc = -1
+            for f, best_train, best_val in results:
+                if best_val and best_val[1] > best_val_acc:
+                    best_val_acc = best_val[1]
+                    best_file = (f, best_train, best_val)
+            
+            if best_file:
+                f, best_train, best_val = best_file
+                print(f"Best performer: {f}")
+                if best_train:
+                    print(f"  Training top-1 = {best_train[1]:.4f}% at epoch {best_train[0]}")
+                if best_val:
+                    print(f"  Validation top-1 = {best_val[1]:.4f}% at epoch {best_val[0]}")
+            else:
+                print("No validation results found in this category.")
+            print()
+    
+    elif args.mean_stdev:
+        # Aggregate mode: compute mean/stdev across all files
+        per_file_train = []
+        per_file_val   = []
+        
+        for f in files:
+            best_train, best_val = per_file_results[f]
+            if best_train:
+                per_file_train.append(best_train[1])
+            if best_val:
+                per_file_val.append(best_val[1])
+        
+        print("Aggregate statistics:")
         summarize(per_file_train, "Training top-1")
         summarize(per_file_val,   "Validation top-1")
+    
+    return
 
 if __name__ == "__main__":
     main()
