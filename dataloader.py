@@ -243,6 +243,28 @@ def apply_gaussian_blur(img, sigma=1.0, kernel_size=5):
     blurred = blurred_img = F.gaussian_blur(img_pil, kernel_size=kernel_size, sigma=sigma)
     return np.array(blurred_img).copy()
 
+
+#TODO: figure out how to concatenate output tensors and how should be fed into model
+def get_orientations(img, orientation):
+    C, H, W = img.shape
+    mid_H = H // 2
+    mid_W = W // 2
+
+    # Split the image into four quadrants
+    if orientation == 0: # side to side top
+        return [img[:, :mid_H, :mid_W], img[:, :mid_H, mid_W:]] #Top left & Right
+    elif orientation == 1: #side to side bot
+        return [img[:, mid_H:, :mid_W], img[:, mid_H:, mid_W:]] #Bot left & Right
+    elif orientation == 2: #on top left
+        return [img[:, :mid_H, :mid_W], img[:, mid_H:, :mid_W]] #Top left & bot left
+    elif orientation == 3: #on top right
+        return [img[:, :mid_H, mid_W:], img[:, mid_H:, mid_W:]] #Top right & bot Right
+    elif orientation == 4: #top right bot left
+        return [img[:, :mid_H, mid_W:], img[:, mid_H:, :mid_W]] #Top right & bot left
+    elif orientation == 5: #top right bot left
+        return [img[:, :mid_H, :mid_W], img[:, mid_H:, mid_W:]] #Top left & bot right
+    else:
+        raise ValueError('orientation should be 0, 1, 2, 3, 4, or 5')
 class DataLoader(object):
     def __init__(self,
                  dataset,
