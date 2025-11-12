@@ -245,26 +245,34 @@ def apply_gaussian_blur(img, sigma=1.0, kernel_size=5):
 
 
 #TODO: figure out how to concatenate output tensors and how should be fed into model
-def get_orientations(img, orientation):
+#THIS IS THE LOGIC FOR THE QUADRANTS PRETEXT TASK 
+def get_quadrants(img):
+    # img: (C, H, W)
     C, H, W = img.shape
-    mid_H = H // 2
-    mid_W = W // 2
+    assert H % 2 == 0 and W % 2 == 0, "H and W must be even."
+    mid_H, mid_W = H // 2, W // 2
+    TL = img[:, :mid_H, :mid_W]
+    TR = img[:, :mid_H,  mid_W:]
+    BL = img[:,  mid_H:, :mid_W]
+    BR = img[:,  mid_H:,  mid_W:]
+    return TL, TR, BL, BR
 
-    # Split the image into four quadrants
-    if orientation == 0: # side to side top
-        return [img[:, :mid_H, :mid_W], img[:, :mid_H, mid_W:]] #Top left & Right
-    elif orientation == 1: #side to side bot
-        return [img[:, mid_H:, :mid_W], img[:, mid_H:, mid_W:]] #Bot left & Right
-    elif orientation == 2: #on top left
-        return [img[:, :mid_H, :mid_W], img[:, mid_H:, :mid_W]] #Top left & bot left
-    elif orientation == 3: #on top right
-        return [img[:, :mid_H, mid_W:], img[:, mid_H:, mid_W:]] #Top right & bot Right
-    elif orientation == 4: #top right bot left
-        return [img[:, :mid_H, mid_W:], img[:, mid_H:, :mid_W]] #Top right & bot left
-    elif orientation == 5: #top right bot left
-        return [img[:, :mid_H, :mid_W], img[:, mid_H:, mid_W:]] #Top left & bot right
-    else:
-        raise ValueError('orientation should be 0, 1, 2, 3, 4, or 5')
+ORIENT_MAP = {
+    0: ("TL", "TR"),  # side-to-side top
+    1: ("BL", "BR"),  # side-to-side bottom
+    2: ("TL", "BL"),  # left column
+    3: ("TR", "BR"),  # right column
+    4: ("TR", "BL"),  # diag 1
+    5: ("TL", "BR"),  # diag 2
+}
+def sample_pair_by_orientation(img, orientation):
+    
+    TL, TR, BL, BR = get_quadrants(img)
+    name2patch = {"TL": TL, "TR": TR, "BL": BL, "BR": BR}
+    a_name, b_name = ORIENT_MAP[orientation]
+    return name2patch[a_name], name2patch[b_name]
+
+
 class DataLoader(object):
     def __init__(self,
                  dataset,
@@ -319,6 +327,23 @@ class DataLoader(object):
                     labels = torch.arange(len(blurred), dtype=torch.long)
                     return torch.stack(blurred, 0), labels
 
+
+                if mode == 'shuffle' :
+                    #    Returns:
+                    #    pair: Tensor of shape (2, C, H/2, W/2)  [patchA, patchB]
+                    #    label: LongTensor scalar in {0..5} 
+                    orientation = random.randint(0, 5)
+                    pA, pB = sample_pair_by_orientation(img0, orientation)
+
+                    if transform is not None:
+                        pA = transform(pA)
+                        pB = transform(pB)
+
+                    # 4) stack for model input
+                    pair = torch.stack([pA, pB], dim=0)  # (2, C, H/2, W/2)
+                    label = torch.tensor(orientation, dtype=torch.long)
+
+                    return pair, label
                 rotated_imgs = [
                     self.transform(img0),
                     self.transform(rotate_img(img0,  90)),
