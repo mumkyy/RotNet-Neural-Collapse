@@ -262,11 +262,15 @@ if __name__=='__main__':
     # 2) build loader
     from dataloader import GenericDataset, DataLoader as RotLoader
     dt = config['data_train_opt']
+    #trying to fix issue with measurements not properly pulling results from 
     ds_train = GenericDataset(
         dataset_name=dt['dataset_name'],
         split=dt['split'],
         random_sized_crop=dt['random_sized_crop'],
-        num_imgs_per_cat=dt.get('num_imgs_per_cat')
+        num_imgs_per_cat=dt.get('num_imgs_per_cat'),
+        pretext_mode=dt.get('pretext_mode', 'rotation'),
+        sigmas=dt.get('sigmas'),
+        kernel_sizes=dt.get('kernel_sizes'),
     )
     loader = RotLoader(
         dataset=ds_train,
