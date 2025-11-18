@@ -231,14 +231,16 @@ def parse_args():
     p.add_argument('--exp',        required=True, help='experiment name, used to find config/config_<exp>.py')
     p.add_argument('--exp_dir',    default=None, help='(optional) full path to the experiment directory; overrides experiments/<exp>')
     p.add_argument('--checkpoint', type=int, default=0, help='epoch id of model_net_epochXX to load')
-    p.add_argument('--batch-size', type=int, default=256)
+    # p.add_argument('--batch-size', type=int, default=256) #we don't really use this 
     p.add_argument('--workers',    type=int, default=4)
     p.add_argument('--no_cuda',    action='store_true')
     p.add_argument('--start-epoch', type=int, default=1, help='first epoch to measure (inclusive)')
     p.add_argument('--end-epoch',   type=int, default=None, help='last epoch to measure (inclusive)')
+    p.add_argument('--metricEval',  type=str,default=None,help='Name of evaluation metric (for non-rotation / non-gaussian-blur experiments)')
     return p.parse_args()
 
 if __name__=='__main__':
+
     args = parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     if not use_cuda:                       # i.e. you passed --no_cuda
@@ -262,26 +264,36 @@ if __name__=='__main__':
     # 2) build loader
     from dataloader import GenericDataset, DataLoader as RotLoader
     dt = config['data_train_opt']
+    metric_args={}
+    pretext_mode=dt.get('pretext_mode', 'rotation')
+
+    if pretext_mode == 'gaussian_blur': 
+        metric_args['kernel_sizes']=dt.get('kernel_sizes')
+    elif pretext_mode == 'gaussian_noise': 
+        metric_args['sigmas']=dt.get('sigmas')
+    
+    if args.metricEval is not None: 
+        metric_args['metricEval'] = args.metricEval
+    
+    batch_size=dt['batch_size']
     #trying to fix issue with measurements not properly pulling results from 
     ds_train = GenericDataset(
         dataset_name=dt['dataset_name'],
         split=dt['split'],
         random_sized_crop=dt['random_sized_crop'],
         num_imgs_per_cat=dt.get('num_imgs_per_cat'),
-        pretext_mode=dt.get('pretext_mode', 'rotation'),
-        sigmas=dt.get('sigmas'),
-        kernel_sizes=dt.get('kernel_sizes'),
+        pretext_mode=pretext_mode,
+        **metric_args,
     )
     loader = RotLoader(
         dataset=ds_train,
-        batch_size=dt['batch_size'],
         unsupervised=dt['unsupervised'],
         epoch_size=dt['epoch_size'],
         num_workers=args.workers,
         shuffle=False
     )(0)
-
-    C = 4  # RotNet 4 rotations
+    dc = config['net_opt']
+    C = dc.get('num_classes', 4)  # RotNet 4 rotations
     feat_layer = config.get('feature_layer', 'encoder')
 
     # 3) instantiate alg + load checkpoint
@@ -326,7 +338,7 @@ if __name__=='__main__':
         compute_metrics(metrics, model, loader, C, feat_layer)
 
     # 5) save  plot curves vs epoch_list (instead of len=1)
-    save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{args.batch_size}_epochs{start}-{end}"
+    save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{batch_size}_epochs{start}-{end}"
     (save_dir/'plots').mkdir(parents=True, exist_ok=True)
     with open(save_dir/'metrics.pkl','wb') as f:
         pickle.dump({'epochs': epoch_list, 'metrics': metrics}, f)
