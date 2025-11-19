@@ -1,0 +1,9 @@
+experiments
+datasets
+*~
+*.pyc
+results
+gpu*
+test.sh
+test_gpu*
+submit.sh
