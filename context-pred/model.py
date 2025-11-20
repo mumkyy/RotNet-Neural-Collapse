@@ -5,12 +5,12 @@ class AlexNetwork(nn.Module):
   def __init__(self,aux_logits = False):
       super(AlexNetwork, self).__init__()
       self.cnn = nn.Sequential(
-        nn.Conv2d(3, 96, kernel_size=11, stride=4),
+        nn.Conv2d(3, 24, kernel_size=11, stride=4),
         nn.ReLU(inplace=True),
         nn.MaxPool2d(kernel_size=3, stride=2),
         nn.LocalResponseNorm(96),
         
-        nn.Conv2d(96, 384, kernel_size=5, stride = 2,padding = 2),
+        nn.Conv2d(24, 96, kernel_size=5, stride = 2,padding = 2),
         nn.ReLU(inplace=True),
         nn.MaxPool2d(kernel_size=3, stride=2),
         nn.LocalResponseNorm(384),
@@ -29,18 +29,18 @@ class AlexNetwork(nn.Module):
         nn.MaxPool2d(kernel_size=3, stride=2,padding = 1),
       )
       self.fc6 = nn.Sequential(
-        nn.Linear(256,4096),
+        nn.Linear(256,1024),
         nn.ReLU(inplace=True),
-        nn.BatchNorm1d(4096),
+        nn.BatchNorm1d(1024),
       )
       self.fc = nn.Sequential(
-        nn.Linear(2*4096,4096),
+        nn.Linear(2*1024,1024),
         nn.ReLU(inplace=True),
 
-        nn.Linear(4096, 4096),
+        nn.Linear(1024, 1024),
         nn.ReLU(inplace=True),
 
-        nn.Linear(4096, 8)
+        nn.Linear(1024, 4)
       )
 
   def forward_once(self, x):
