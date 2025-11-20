@@ -11,7 +11,7 @@ class AlexNetwork(nn.Module):
             
             nn.Conv2d(96, 384, kernel_size=3, stride=1, padding=1),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),  # 16x16 -> 8x8
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 32x32 -> 16x16
             nn.GroupNorm(96,384),
             
             nn.Conv2d(384, 384, kernel_size=3, stride=1, padding=1),
@@ -21,7 +21,16 @@ class AlexNetwork(nn.Module):
             nn.Conv2d(384, 384, kernel_size=3, stride=1, padding=1),
             nn.ReLU(inplace=True),
             nn.GroupNorm(96, 384),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 16x16 -> 8x8
+
+            nn.Conv2d(384, 384, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.GroupNorm(96, 384),
             
+            nn.Conv2d(384, 384, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.GroupNorm(96, 384),
+
             nn.Conv2d(384, 256, kernel_size=3, stride=1, padding=1),
             nn.ReLU(inplace=True),
             nn.GroupNorm(64, 256),
