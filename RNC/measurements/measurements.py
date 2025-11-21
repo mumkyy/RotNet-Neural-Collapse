@@ -292,7 +292,7 @@ if __name__=='__main__':
         num_workers=args.workers,
         shuffle=False
     )(0)
-    dc = config['net_opt']
+    dc = config['networks']['model']['opt']
     C = dc.get('num_classes', 4)  # RotNet 4 rotations
     feat_layer = config.get('feature_layer', 'encoder')
 
