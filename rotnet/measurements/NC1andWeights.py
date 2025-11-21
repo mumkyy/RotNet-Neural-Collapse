@@ -3,10 +3,10 @@
 
 """
 # collapsed run
-python NC1_with_weights.py --exp CIFAR10_RotNet_NIN4blocks_collapsed --checkpoint 200 --batch-size 128 --workers 0
+python NC1_with_weights.py --exp CIFAR10_RotNet_NIN4blocks_collapsed --checkpoint 200 --workers 0
 
 # non-collapsed run
-python NC1_with_weights.py --exp CIFAR10_RotNet_NIN4blocks_notcollapsed --checkpoint 200 --batch-size 128 --workers 0
+python NC1_with_weights.py --exp CIFAR10_RotNet_NIN4blocks_notcollapsed --checkpoint 200 --workers 0
 
 
 """
@@ -162,18 +162,15 @@ def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoaderataload
     feats.clear()
 
 
-#THE BELOW IS CHAT GPT GENERATED NEED TO MANUALLY PARSE 
-# -------------------------------------------------------------------------
-# CLI & Main script
-# -------------------------------------------------------------------------
+#CLI
 def parse_args():
     p = argparse.ArgumentParser("Measure NC on a RotNet experiment")
-    p.add_argument('--exp',        required=True, help='experiment name, used to find config/config_<exp>.py')
-    p.add_argument('--exp_dir',    default=None, help='(optional) full path to the experiment directory; overrides experiments/<exp>')
+    p.add_argument('--exp',        required=True, help='experiment name, used to find config/config_<exp>.py enter config name without config/ prefix this is automatically appended')
+    p.add_argument('--exp_dir',    default=None, help='(optional) full path to the experiment directory; overrides experiments/<exp> enter experiment')
     p.add_argument('--checkpoint', type=int, default=0, help='epoch id of model_net_epochXX to load')
-    p.add_argument('--batch-size', type=int, default=256)
     p.add_argument('--workers',    type=int, default=4)
     p.add_argument('--no_cuda',    action='store_true')
+    p.add_argument('--metricEval',  type=str,default=None,help='Name of evaluation metric (for non-rotation / non-gaussian-blur experiments)')
     return p.parse_args()
 
 
@@ -186,7 +183,7 @@ if __name__ == '__main__':
 
     set_seed(42)
 
-    # 1) load config
+    # 1) load config and experimemnt (trained model)
     cfg_file = Path('config') / f"{args.exp}.py"
     spec = importlib.util.spec_from_file_location("cfg", cfg_file)
     cfg_mod = importlib.util.module_from_spec(spec)
@@ -200,24 +197,38 @@ if __name__ == '__main__':
 
     # 2) build loader
     from dataloader import GenericDataset, DataLoader as RotLoader
+    
     dt = config['data_train_opt']
+    metric_args={} 
+    #grab the pretext mode and if it is not set in args use default rotation
+    pretext_mode=dt.get('pretext_mode', 'rotation')
+
+    if pretext_mode == 'gaussian_blur':
+        metric_args['kernel_sizes']=dt.get('kernel_sizes')
+    elif pretext_mode == 'gaussian_noise': 
+        metric_args['sigmas']=dt.get('sigmas')
+    else: 
+        metric_args['metricEval'] = args.metricEval
+
+    batch_size=dt['batch_size']
     ds_train = GenericDataset(
         dataset_name=dt['dataset_name'],
         split=dt['split'],
         random_sized_crop=dt['random_sized_crop'],
-        num_imgs_per_cat=dt.get('num_imgs_per_cat')
+        num_imgs_per_cat=dt.get('num_imgs_per_cat'),
+        pretext_mode=pretext_mode, 
+        **metric_args,
     )
     loader = RotLoader(
         dataset=ds_train,
-        batch_size=args.batch_size,
         unsupervised=dt['unsupervised'],
         epoch_size=dt['epoch_size'],
         num_workers=args.workers,
         shuffle=False
     )(0)
-
-    C = 4  # RotNet 4 rotations
-
+    dc = config['net_opt']
+    C = dc.get('num_classes', 4) # RotNet 4 rotations default , otheriwse get from netopt
+    feat_layer = config.get('feature_layer', 'encoder')
     # 3) instantiate alg + load checkpoint
     import algorithms as alg
     algo = getattr(alg, config['algorithm_type'])(config)
@@ -233,18 +244,17 @@ if __name__ == '__main__':
     model = feat_extractor
 
     print("Available feature layers:", model.all_feat_names)
-
-    # ------------------------------------------------------------------
-    # Weight analysis (once per checkpoint)
-    # ------------------------------------------------------------------
-    conv_layers = []
+    #weights extraction (onece per checkpoint)
+    conv_layers = [] 
     linear_layers = []
+    #grab the model layers convolutional and linear
     for name, m in model.named_modules():
         if isinstance(m, nn.Conv2d):
             conv_layers.append((name, m))
         elif isinstance(m, nn.Linear):
             linear_layers.append((name, m))
 
+    #print the layers with their shape
     print("\n[Weights] Found convolutional layers:")
     for i, (name, m) in enumerate(conv_layers):
         print(f"  Conv[{i}]: {name}, weight shape = {tuple(m.weight.shape)}")
@@ -255,14 +265,16 @@ if __name__ == '__main__':
 
     # Focus: conv2 + output layer (same index across collapsed / non-collapsed 4-block models)
     focus_stats = []
+    #second convolutional block conv_layers = [ conv1 , conv2, conv3, conv4]
     if len(conv_layers) >= 2:
         conv2_name, conv2_mod = conv_layers[1]
+        #this will store a dict[str] with rank, compressed and noncompressed shape and name
         stats_conv2 = compute_weight_stats(conv2_name, conv2_mod)
         focus_stats.append(stats_conv2)
         print("\n[Weights] Conv2 stats:", stats_conv2)
     else:
         print("\n[Weights] WARNING: < 2 conv layers; cannot define conv2.")
-
+    #output layer weight computation 
     if len(linear_layers) >= 1:
         out_name, out_mod = linear_layers[-1]
         stats_out = compute_weight_stats(out_name, out_mod)
@@ -277,10 +289,12 @@ if __name__ == '__main__':
         s = compute_weight_stats(name, m)
         all_block_stats.append(s)
 
-    save_dir = Path('results') / f"{args.exp}_{type(model).__name__}" / f"bs{args.batch_size}"
+    #path = results/configFile->args._modelTYPE(CNN).__main__/bs(from config)
+    save_dir = Path('results') / f"{args.exp}_{type(model).__name__}" / f"bs{batch_size}"
     (save_dir / 'plots').mkdir(parents=True, exist_ok=True)
-
+    #weights file will be saved at results/configFile_CNN.__main__/bs(from_config)/weight_stats_checkpoint
     weights_file = save_dir / f"weight_stats_checkpoint{args.checkpoint}.txt"
+    
     with open(weights_file, 'w') as fp:
         fp.write(f"Weight statistics for checkpoint {args.checkpoint}\n\n")
 
@@ -290,9 +304,6 @@ if __name__ == '__main__':
             fp.write(f"  shape:        {s['shape']}\n")
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
             fp.write(f"  rank:         {s['rank']}\n")
-            fp.write(f"  fro_norm:     {s['fro_norm']:.6f}\n")
-            fp.write(f"  spec_norm:    {s['spec_norm']:.6f}\n")
-            fp.write(f"  stable_rank:  {s['stable_rank']:.6f}\n\n")
 
         fp.write("\n=== All conv + linear blocks ===\n")
         for s in all_block_stats:
@@ -300,23 +311,19 @@ if __name__ == '__main__':
             fp.write(f"  shape:        {s['shape']}\n")
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
             fp.write(f"  rank:         {s['rank']}\n")
-            fp.write(f"  fro_norm:     {s['fro_norm']:.6f}\n")
-            fp.write(f"  spec_norm:    {s['spec_norm']:.6f}\n")
-            fp.write(f"  stable_rank:  {s['stable_rank']:.6f}\n\n")
+
 
     print(f"\n✓ Weight stats written to {weights_file}\n")
 
-    # ------------------------------------------------------------------
     # NC1 across layers
-    # ------------------------------------------------------------------
     layers = model.all_feat_names
     nc1_per_layer = {}
-
+    
     for layer in tqdm(layers, desc="Measuring NC1 per layer"):
         metrics = Measurements()
         compute_metrics(metrics, model, loader, C, layer)
         nc1_per_layer[layer] = metrics.trSwtrSb[-1]
-
+    #results/configFile_CNN.__main__/bs(from_config)/NC1WrittenVals.txt
     out_file = save_dir / 'NC1WrittenVals.txt'
     with open(out_file, 'w') as fp:
         fp.write(f"NC1 metrics for checkpoint {args.checkpoint}\n")
@@ -326,7 +333,7 @@ if __name__ == '__main__':
 
     x = list(nc1_per_layer.keys())
     y = [nc1_per_layer[l] for l in x]
-
+    #plot 
     plt.figure()
     plt.plot(range(len(x)), y, 'bx-')
     plt.xticks(range(len(x)), x, rotation=45, ha='right')
