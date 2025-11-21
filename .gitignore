@@ -7,3 +7,4 @@ gpu*
 test.sh
 test_gpu*
 submit.sh
+context-pred/data
