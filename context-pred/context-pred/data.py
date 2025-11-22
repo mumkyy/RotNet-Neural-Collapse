@@ -20,14 +20,25 @@ class MyDataset(Dataset):
   
   def get_patch_from_grid(self, image, patch_dim, gap, loc_index):
     image = np.array(image)
+    H, W = image.shape[0], image.shape[1]
+
+    #Same ratio from the paper: 96 patch size -> 7 pixel jitter
+    jitter = max(1,(patch_dim * 7 )// 96)
+    jx = np.random.randint(-jitter,jitter+1)
+    jy =  np.random.randint(-jitter,jitter+1)
 
     offset_x, offset_y = image.shape[0] - (patch_dim*3 + gap*2), image.shape[1] - (patch_dim*3 + gap*2)
     start_grid_x, start_grid_y = offset_x//2, offset_y//2
     loc = loc_index
     tempx, tempy = self.patch_loc_arr[loc]
     
-    patch_x_pt = start_grid_x + patch_dim * (tempx-1) + gap * (tempx-1)
-    patch_y_pt = start_grid_y + patch_dim * (tempy-1) + gap * (tempy-1)
+    patch_x_pt = start_grid_x + patch_dim * (tempx-1) + gap * (tempx-1) + jx
+    patch_y_pt = start_grid_y + patch_dim * (tempy-1) + gap * (tempy-1) + jy
+
+    #clamping in case jitter goes over the boundaries of the image
+    patch_x_pt = max(0, min(patch_x_pt, H - patch_dim))
+    patch_y_pt = max(0, min(patch_y_pt, W - patch_dim))
+  
     random_patch = image[patch_x_pt:patch_x_pt+patch_dim, patch_y_pt:patch_y_pt+patch_dim]
 
     patch_x_pt = start_grid_x + patch_dim * (2-1) + gap * (2-1)
