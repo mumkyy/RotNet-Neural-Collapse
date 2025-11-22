@@ -59,14 +59,25 @@ class MyDataset(Dataset):
     img, _ = self.base_ds[img_index]
     uniform_patch, random_patch, random_patch_label = self.get_patch_from_grid(img, self.patch_dim, self.gap, loc_index)
 
-    # Dropped color channels 2 and 3 and replaced with gaussian noise(std ~1/100 of the std of the remaining channel)
-    uniform_patch[:, :, 1] = np.random.normal(0.485, 0.01 * np.std(uniform_patch[:, :, 0]), (uniform_patch.shape[0],uniform_patch.shape[1]))
-    uniform_patch[:, :, 2] = np.random.normal(0.485, 0.01 * np.std(uniform_patch[:, :, 0]), (uniform_patch.shape[0],uniform_patch.shape[1]))
-    random_patch[:, :, 1] = np.random.normal(0.485, 0.01 * np.std(random_patch[:, :, 0]), (random_patch.shape[0],random_patch.shape[1]))
-    random_patch[:, :, 2] = np.random.normal(0.485, 0.01 * np.std(random_patch[:, :, 0]), (random_patch.shape[0],random_patch.shape[1]))
+    #convert patches to float
+    uniform_patch = uniform_patch.astype(np.float32) / 255.0
+    random_patch = random_patch.astype(np.float32) / 255.0
+
+    #randomly choose color channels to choose and drop
+    c_keep = np.random.randint(0,3)
+    c_drop1, c_drop2 = {0,1,2} - {c_keep}
+
+    # Drop color channels and replace with gaussian noise(std ~1/100 of the std of the remaining channel)
+    u_noise_std = 0.01 * np.std(uniform_patch[:, :, c_keep])
+    r_noise_std = 0.01 * np.std(random_patch[:, :, c_keep])
+
+    uniform_patch[:, :, c_drop1] = np.random.normal(0.5, u_noise_std, uniform_patch.shape[:2])
+    uniform_patch[:, :, c_drop2] = np.random.normal(0.5, u_noise_std, uniform_patch.shape[:2])
+    random_patch[:, :, c_drop1] = np.random.normal(0.5, r_noise_std, random_patch.shape[:2])
+    random_patch[:, :, c_drop2] = np.random.normal(0.5, r_noise_std , random_patch.shape[:2])
 
     random_patch_label = np.array(random_patch_label).astype(np.int64)
-        
+
     if self.transform:
       uniform_patch = self.transform(uniform_patch)
       random_patch = self.transform(random_patch)
