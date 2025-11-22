@@ -1,10 +1,8 @@
 #!/usr/bin/env python 
 #coding: utf-8
 """
-# collapsed run
-python weigths.py --exp CIFAR10_RotNet_NIN4blocks_collapsed --checkpoint 200 --workers 0
-# non-collapsed run
-python weigths.py --exp CIFAR10_RotNet_NIN4blocks_notcollapsed --checkpoint 200 --workers 0
+RUN THE FILE
+python -m measurements.weight --exp CIFAR10/RotNet/MSE/Collapsed/backbone/CIFAR10_RotNet_NIN4blocks_Collapsed_MSE --exp_dir ../experiments/CIFAR10_RotNet_NIN4blocks_Collapsed_MSE --checkpoint 200
 """
 import argparse, importlib.util, os, pickle, random
 from pathlib import Path
