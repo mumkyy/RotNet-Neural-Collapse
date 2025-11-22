@@ -1,357 +1,706 @@
 #!/usr/bin/env python
 # coding: utf-8
+
 """
-================================================================================
-Neural-Collapse Metric Suite for RotNet Checkpoints
-================================================================================
 
-This script scans **one or many** saved checkpoints from a RotNet experiment
-and produces the four canonical Neural-Collapse statistics (NC-1 … NC-4) plus
-auxiliary curves (loss, accuracy, NCC mismatch).  Results are stored as a
-`metrics.pkl` file *and* as tidy PDF plots vs. training epoch.
+NC1     = Tr(S_W)/Tr(S_B)
+NC2     = CoV of class norm means (M) and weights (W) plus average off diagonal coherence for both
+NC3     = || W / ||W||_F - M_c / ||M_c||_F ||_F^2
+NCC Mismatch = 1 -P(argmax(net) == argmin NCC-distance)
 
-Typical one-liner
------------------
-    # analyse a single checkpoint on CPU
-    python measurements.py \
-        --exp       CIFAR10_RotNet_NIN4blocks \
-        --checkpoint 44 \
-        --batch-size 512 \
-        --workers   0 \
-        --no_cuda
-
-Full feature set
-----------------
-Argument            | Meaning & examples
-------------------- | ---------------------------------------------------------
-`--exp` *NAME*      | Experiment name **without** path. Must have a matching
-                    | `config/config_<NAME>.py` and (by default) checkpoints in
-                    | `experiments/<NAME>/`.
-`--exp_dir` *PATH*  | **Override** the automatic directory above, e.g.\
-                    | `--exp_dir "D:/runs/RotNet/CIFAR10_RotNet_NIN4blocks"`.
-`--checkpoint` *N*  | Epoch ID to load first (default 0 = start from earliest
-                    | checkpoint found). \
-                    | Use together with `--start-epoch / --end-epoch` to scan a
-                    | **range** of epochs in one shot.
-`--start-epoch` *N* | First epoch to analyse (inclusive, default 1).
-`--end-epoch` *N*   | Last  epoch to analyse (inclusive, default = latest file).
-`--batch-size`      | Forward-pass batch size for metric computation
-                    | (does **not** affect training).
-`--workers`         | Dataloader workers (same as in training config).
-`--no_cuda`         | Force CPU evaluation even if a GPU is visible.
-
-What the script actually does
------------------------------
-1. **Load config**   (`config/<exp>.py`) – identical to *main.py*.
-2. **Recreate loaders** for the 4-rotation self-supervised task.
-3. **Instantiate** the chosen `Algorithm` class, *but without* resuming
-   optimisation (we only need the networks).
-4. **Iterate over checkpoints**  
-   (`<exp_dir>/*_net_epochXX`) and for each epoch:
-   • feed the entire train split once  
-   • compute NC-1 … NC-4, loss, accuracy, NCC-mismatch.
-5. **Save outputs** to  
-   `results/<exp>_<arch>/bs<batch>_epochs<first>-<last>/`:
-   * `metrics.pkl`   – pickled dict with `epochs` and all curves  
-   * `plots/*.pdf`   – one figure per metric.
-
-The script is read-only with respect to your experiment folder; it never
-overwrites checkpoints.
 """
-import argparse, importlib.util, os, pickle, random
+
+import argparse 
+import importlib.util
+import os
+import pickle 
+import random
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple 
 
 import numpy as np
-from tqdm import tqdm  # added for progress bars
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
-from scipy.sparse.linalg import svds, ArpackError
-from torch.utils.data import DataLoader
 
-# -----------------------------------------------------------------------------
-# Simple seed helper (same as utils.set_seed)
-# -----------------------------------------------------------------------------
-def set_seed(seed: int):
+from scipy.sparse.linalg import svds, ArpackError
+
+def set_seed(seed: int) ->  None:  
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    torch.cuda.manual_seed_all(seed) 
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-# -----------------------------------------------------------------------------
-# NC metrics collector
-# -----------------------------------------------------------------------------
 class Measurements:
-    def __init__(self):
-        self.accuracy = []
-        self.loss     = []
-        self.trSwtrSb = []
-        self.norm_M_CoV = []
-        self.norm_W_CoV = []
-        self.cos_M    = []
-        self.cos_W    = []
-        self.W_M_dist = []
-        self.NCC_mismatch = []
 
-# -----------------------------------------------------------------------------
-# Compute NC metrics in one full pass
-# -----------------------------------------------------------------------------
-@torch.no_grad()
-def compute_metrics(M: Measurements, model: nn.Module, loader: DataLoader, C: int, feat_layer: str):
-    device = 'cuda' if next(model.parameters()).is_cuda else 'cpu'
-    model.eval().to(device)
+    def __init__(self) -> None: 
+        self.accuracy: List[float]      = []
+        self.loss: List[float]          = []
+        self.trSwtrSb: List[float]      = [] #NC1 : Tr(Sw)/Tr(Sb)
+        self.norm_M_CoV: List[float]    = [] #CoV of ||avg(class) - avg(global)||
+        self.norm_W_CoV: List[float]    = [] #cov of ||within class||
+        self.cos_m: List[float]         = [] #coherence of M_c : Angle Uniformity (NC-2) for Features.
+        self.cos_W: List[float]         = [] #coherence of W : Angle Uniformity (NC-2) for Weights
+        self.W_M_dist: List[float]      = [] #Alignment of Features and Weights.
+        self.NCC_mismatch: List[float]  = [] #Classifier Consistency.
 
-    # Automatically find the classification layer (last nn.Linear)
+def build_loss_from_config(config: dict) -> Optional[nn.Module]:
+
+    """
+    Config.py should have:             
+        criterions = {}
+        criterions['loss'] = {'ctype':'MSELoss', 'opt':None}
+        config['criterions'] = criterions
+        config['algorithm_type'] = 'ClassificationModel'
+
+    we want to use this to construct loss 
+    """
+    cirterion_cfg = config.get('criterions', {}).get('loss',None)
+
+    if cirterion_cfg is None: 
+        print("[Measurement] No loss configured, loss curve will be skipped")
+        return None
+
+    #grab the loss type 
+    ctype = cirterion_cfg.get('ctype', 'CrossEntropyLoss')
+    opt = cirterion_cfg.get('opt') or {}
+
+#basically take anything that is not CE and turn it into CE , i.e Using Ce as loss_fn 
+    if hasattr(nn, ctype):
+        loss_cls = getattr(nn, ctype)
+
+        if ctype in ('CrossEntropyLoss', 'NLLLoss', 'NLLLoss2d'):
+            return loss_cls(**opt)
+        else: 
+            print(f"[Measurement] configure loss '{ctype}' may not be compatible with integer labells, using CE for eval")
+    else: 
+        print(f"[Measurement] Unknown loss type '{ctype}'; using CELoss for evaluation instead")
+
+    return nn.CrossEntropyLoss()
+
+
+def infer_num_classes(model: nn.Module, config: dict, not_key: str) -> int: 
+
+    """
+        Check if config['networks'][net_key]['opt']['num_classes'] is present 
+        out_features of the last nn.Linear layer in the model 
+
+        raise a runtime error if C cant be determined
+    """
+    C_cfg = None
+    try: 
+        C_cfg = config.get('networks', {}) \
+                     .get(net_key, {}) \
+                     .get('opt', {}) \
+                     .get('num_classes', None)
+    except Exception:
+        C_cfg = None
+
+    if C_cfg is not None: 
+        return int(C_cfg)
+    
+    last_linear = None
+    for m in model.modules():
+        if isinstance(m, nn.Linear):
+            last_linear=m
+
+    if last_linear is not None:
+        return int(last_linear.out_features)
+    
+    raise RuntimeError(
+        "Could not infer num_classes, no 'num_classes' in config for" 
+        f"net_key= '{net_key}' and no nn.lkinear layers found in the model"
+    )
+
+
+
+
+#CHATGPT FROM HERE ON OUT NEED TO CHECK
+
+def find_classification_layer(model: nn.Module) -> nn.Linear:
     cls_layer = None
     for m in model.modules():
         if isinstance(m, nn.Linear):
             cls_layer = m
     if cls_layer is None:
-        raise RuntimeError("No nn.Linear layer found in the model to hook features.")
+        raise RuntimeError("No nn.Linear layer found in the model.")
+    return cls_layer
 
-    # hook on classification layer to grab penultimate features
+
+def find_named_module(model: nn.Module, name: str) -> nn.Module:
+    """
+    Find a module by its .named_modules() name.
+
+    Raises if not found.
+    """
+    for n, m in model.named_modules():
+        if n == name:
+            return m
+    raise RuntimeError(
+        f"Could not find module with name '{name}' in model.named_modules()."
+    )
+
+
+def build_fresh_model(config: dict,
+                      net_key: str,
+                      arch_class: Optional[str],
+                      use_cuda: bool) -> nn.Module:
+    """
+    Instantiate a fresh model according to config['networks'][net_key].
+
+    Uses:
+      - def_file: path to architecture .py file
+      - opt:      kwargs for model constructor
+      - arch:     optional override for class name in that file
+      - arch_class CLI arg: overrides arch if provided
+
+    If neither arch_class nor arch is given, we default to the file stem.
+    """
+    net_cfg_all = config.get('networks', {})
+    if net_key not in net_cfg_all:
+        raise RuntimeError(
+            f"net_key '{net_key}' not found in config['networks']. "
+            f"Available: {list(net_cfg_all.keys())}"
+        )
+    net_cfg = net_cfg_all[net_key]
+
+    def_file = net_cfg['def_file']        # e.g. 'architectures/NetworkInNetwork.py'
+    opt_dict = net_cfg.get('opt', {})     # kwargs for model constructor
+
+    module_path = Path(def_file)
+    if not module_path.is_file():
+        raise FileNotFoundError(f"def_file not found: {module_path}")
+
+    spec_model = importlib.util.spec_from_file_location(
+        module_path.stem, module_path
+    )
+    mod_model = importlib.util.module_from_spec(spec_model)
+    spec_model.loader.exec_module(mod_model)  # type: ignore
+
+    # Determine class name: CLI overrides config, config overrides stem
+    cls_name = arch_class or net_cfg.get('arch', module_path.stem)
+    if not hasattr(mod_model, cls_name):
+        raise RuntimeError(
+            f"Could not find class '{cls_name}' in {def_file}. "
+            "Either pass --arch-class, or add 'arch' to config['networks'][net_key]."
+        )
+    ModelCls = getattr(mod_model, cls_name)
+    model = ModelCls(**opt_dict)
+    if use_cuda:
+        model = model.cuda()
+    return model
+
+
+# =============================================================================
+# NC Metric Computation
+# =============================================================================
+
+@torch.no_grad()
+def compute_metrics(
+    M: Measurements,
+    model: nn.Module,
+    loader: torch.utils.data.DataLoader,
+    C: int,
+    loss_fn: Optional[nn.Module],
+    feat_module_name: Optional[str] = None,
+) -> None:
+    """
+    Compute NC metrics, loss, accuracy for a single model (single epoch).
+
+    Parameters
+    ----------
+    M : Measurements
+        Container to which metric scalars for this epoch are appended.
+
+    model : nn.Module
+        End-to-end model that maps x -> logits of shape (N, C).
+
+    loader : DataLoader
+        DataLoader yielding (x, y) where y are integer class labels in [0, C-1].
+
+    C : int
+        Number of classes.
+
+    loss_fn : nn.Module or None
+        Evaluation loss function. If None, loss is recorded as NaN.
+
+    feat_module_name : str or None
+        If None:
+            - hook is attached to the *input* of the last nn.Linear layer
+              (penultimate features).
+        If non-None:
+            - hook is attached to the *output* of the module with this name
+              in model.named_modules().
+    """
+    device = torch.device('cuda' if next(model.parameters()).is_cuda else 'cpu')
+    model.eval().to(device)
+
+    # -------------------------------------------------------------------------
+    # Set up feature hook
+    # -------------------------------------------------------------------------
     feats: Dict[str, torch.Tensor] = {}
-    def hook(module, inp, out):
-        feats['h'] = inp[0].detach().cpu()
-    handle = cls_layer.register_forward_hook(hook)
 
+    if feat_module_name is None:
+        # Default: penultimate feature = input to final Linear (classification).
+        cls_layer = find_classification_layer(model)
+
+        def hook(module, inp, out):
+            # inp[0]: tensor of shape (N, D)
+            feats['h'] = inp[0].detach().cpu()
+
+        handle = cls_layer.register_forward_hook(hook)
+    else:
+        # Hook output of a specific named module
+        feat_module = find_named_module(model, feat_module_name)
+
+        def hook(module, inp, out):
+            # out should be (N, D) or something flattenable per sample
+            if isinstance(out, torch.Tensor):
+                feats['h'] = out.detach().cpu().view(out.size(0), -1)
+            else:
+                raise RuntimeError(
+                    f"Hooked module '{feat_module_name}' did not return a "
+                    "Tensor; cannot use as feature layer."
+                )
+
+        handle = feat_module.register_forward_hook(hook)
+
+    # -------------------------------------------------------------------------
+    # PASS 1: class means, loss, accuracy
+    # -------------------------------------------------------------------------
     N_per_class = torch.zeros(C, dtype=torch.long)
-    sum_per_class: List[torch.Tensor] = []
-    # Sw = torch.zeros(0)
-    total_ss = 0.0
-    loss_fn = nn.CrossEntropyLoss()
-    total_loss = net_correct = NCC_match = 0
+    sum_per_class: List[Optional[torch.Tensor]] = [None for _ in range(C)]
+    total_ss = 0.0  # used later for trace(Sw)
+    total_loss = 0.0
+    net_correct = 0
+    NCC_match = 0
 
-    # PASS 1: means, loss, accuracy
     print("[Measurement] PASS 1: computing class means, accuracy, and loss...")
-    for x, y in tqdm(loader, desc="PASS 1", unit="batch"):  # progress bar
+    for x, y in tqdm(loader, desc="PASS 1", unit="batch"):
+        x, y = x.to(device), y.to(device)
 
+        out = model(x)  # expected shape: (N, C)
+        if 'h' not in feats:
+            raise RuntimeError(
+                "Feature hook did not run; check feat_module_name and model."
+            )
+        h = feats['h'].view(len(x), -1)  # (N, D)
+
+        # Loss (if defined)
+        if loss_fn is not None:
+            total_loss += loss_fn(out, y).item() * len(x)
+
+        # Accuracy: argmax over classes
+        net_correct += (out.argmax(1).cpu() == y.cpu()).sum().item()
+
+        # Accumulate per-class sums for means
+        y_cpu = y.cpu()
+        for c in range(C):
+            idx = (y_cpu == c).nonzero(as_tuple=False).squeeze(1)
+            if idx.numel() == 0:
+                continue
+            hc = h[idx]  # (n_c, D)
+            if sum_per_class[c] is None:
+                sum_per_class[c] = hc.sum(0)
+            else:
+                sum_per_class[c] += hc.sum(0)
+            N_per_class[c] += hc.size(0)
+
+    # Build class means μ_c
+    means: List[torch.Tensor] = []
+    for c in range(C):
+        n_c = int(N_per_class[c].item())
+        if n_c == 0:
+            # No samples from this class in loader; this is usually an error
+            raise RuntimeError(
+                f"Class {c} has N_per_class=0; the data split does not contain "
+                "all classes, cannot compute NC metrics robustly."
+            )
+        means.append(sum_per_class[c] / float(n_c))  # type: ignore
+
+    Mmat = torch.stack(means, dim=1)  # D x C
+    muG  = Mmat.mean(dim=1, keepdim=True)  # D x 1
+
+    # -------------------------------------------------------------------------
+    # PASS 2: within-class scatter (trace(Sw)) and NCC mismatch
+    # -------------------------------------------------------------------------
+    print("[Measurement] PASS 2: computing within-class scatter and NCC mismatch...")
+    for x, y in tqdm(loader, desc="PASS 2", unit="batch"):
         x, y = x.to(device), y.to(device)
         out = model(x)
-        h   = feats['h'].view(len(x), -1)
 
-        # if Sw.numel()==0:
-        #     Sw = torch.zeros(h.size(1), h.size(1))
+        if 'h' not in feats:
+            raise RuntimeError(
+                "Feature hook did not run in PASS 2; check feat_module_name."
+            )
+        h = feats['h'].view(len(x), -1)  # (N, D)
 
-        total_loss += loss_fn(out, y).item() * len(x)
-        net_correct += (out.argmax(1).cpu()==y.cpu()).sum().item()
-
+        y_cpu = y.cpu()
         for c in range(C):
-            idx = (y.cpu()==c).nonzero(as_tuple=False).squeeze(1)
-            if idx.numel():
-                hc = h[idx]
-                if len(sum_per_class)<C:
-                    sum_per_class.append(hc.sum(0))
-                else:
-                    sum_per_class[c] += hc.sum(0)
-                N_per_class[c] += hc.size(0)
+            idx = (y_cpu == c).nonzero(as_tuple=False).squeeze(1)
+            if idx.numel() == 0:
+                continue
 
-    means = [s / max(n,1) for s,n in zip(sum_per_class, N_per_class)]
-    Mmat  = torch.stack(means).T
-    muG   = Mmat.mean(1, keepdim=True)
+            hc = h[idx]  # (n_c, D)
+            z = hc - means[c]  # centered features
 
-    # PASS 2: within-class cov, NCC match
-    print("[Measurement] PASS 2: computing within-class covariance and NCC mismatch...")
-    for x, y in tqdm(loader, desc="PASS 2", unit="batch"):  # progress bar
-        x, y = x.to(device), y.to(device)
-        out = model(x)
-        h   = feats['h'].view(len(x), -1)
+            # Accumulate squared distances ||x - μ_y||^2 for trace(Sw)
+            total_ss += z.pow(2).sum(dim=1).sum().item()
 
-        for c in range(C):
-            idx = (y.cpu()==c).nonzero(as_tuple=False).squeeze(1)
-            if idx.numel():
-                hc = h[idx]
-                z  = hc - means[c]
-                # Sw += (z.unsqueeze(2) @ z.unsqueeze(1)).sum(0)
-                total_ss += (z.pow(2).sum(dim=1)).sum().item()
-                dists = torch.norm(hc.unsqueeze(1) - Mmat.T.unsqueeze(0), dim=2)
-                NCCp  = dists.argmin(dim=1)
-                netp  = out[idx].argmax(1).cpu()
-                NCC_match += (NCCp==netp).sum().item()
+            # NCC predictions: nearest class mean (Euclidean distance)
+            dists = torch.norm(
+                hc.unsqueeze(1) - Mmat.T.unsqueeze(0),
+                dim=2
+            )  # (n_c, C)
+            NCCp = dists.argmin(dim=1)              # NCC predicted class
+            netp = out[idx].argmax(dim=1).cpu()     # network predicted class
 
-        print("[Measurement] Finalizing metrics...")
+            NCC_match += (NCCp == netp).sum().item()
 
-    # finalize
-    N = N_per_class.sum().item()
-    # Sw /= N
-    trace_Sw = total_ss / N
-    loss = total_loss / N
-    acc  = net_correct / N
-    NCCm = 1 - NCC_match / N
+    # -------------------------------------------------------------------------
+    # Finalize scalar metrics
+    # -------------------------------------------------------------------------
+    print("[Measurement] Finalizing metrics for this epoch...")
 
-    # ------------------------------------------------------------------
-    # NC-1  -- trace ratio (Tr(Sw) / Tr(Sb)) (GPU-aware)
-    # ------------------------------------------------------------------
+    N = int(N_per_class.sum().item())
+    if N == 0:
+        raise RuntimeError("No samples seen in loader; cannot compute metrics.")
 
-    # --- 1. compute Σ_b  (= between-class scatter) on GPU ----------
-    Sb = (Mmat - muG) @ (Mmat - muG).T / C        # D×D torch tensor (GPU)
-    # simple trace‐ratio NC1
-    # trace_Sw = Sw.trace()                  # sum of diagonal of Sw
-    # simple trace‐ratio NC1: we already have trace_Sw = E[||x-μ_y||²]
-    trace_Sb = Sb.trace()                  # sum of diagonal of Sb
-    # guard tiny denominators
+    # Loss & accuracy
+    if loss_fn is not None:
+        loss = total_loss / float(N)
+    else:
+        loss = float('nan')
+    acc = net_correct / float(N)
+
+    NCCm = 1.0 - NCC_match / float(N)
+
+    # --- NC-1: trace(Sw) / trace(Sb) -----------------------------------------
+    # trace(Sw) = E[||x - μ_y||^2] (already averaged over all samples)
+    trace_Sw = total_ss / float(N)
+
+    # Between-class scatter Sb = (1/C) Σ_c (μ_c - μ_G)(μ_c - μ_G)^T
+    M_centered = Mmat - muG  # D x C
+    Sb = (M_centered @ M_centered.T) / float(C)  # D x D
+    trace_Sb = Sb.trace().item()
+
     eps = 1e-12
     nc1_ratio = trace_Sw / (trace_Sb + eps)
-    trSwtrSb = nc1_ratio.item()            # now holds Tr(Sw)/Tr(Sb)
 
-    # NC-2
-    W = cls_layer.weight.T
-    M_c = (Mmat - muG).to(W.device)
-    Mn, Wn = M_c.norm(p=2, dim=0), W.norm(p=2, dim=0)
-    covM = (Mn.std(unbiased=False)/Mn.mean()).item()
-    covW = (Wn.std(unbiased=False)/Wn.mean()).item()
-    def coherence(V):
-        G = V.T@V
-        G = G/(G.norm(1,keepdim=True)+1e-9)
-        G.fill_diagonal_(0)
-        return (G.abs().sum()/(C*(C-1))).item()
-    cosM = coherence(M_c/Mn)
-    cosW = coherence(W/Wn)
+    # --- NC-2: CoV of norms + coherence --------------------------------------
+    # M_c are centered means per class
+    # W are classifier weights per class
+    cls_layer = find_classification_layer(model)
+    W = cls_layer.weight.T  # (D, C)
 
-    # NC-3
-    W_M_dist = (W/W.norm() - M_c/M_c.norm()).norm().pow(2).item()
+    M_c = M_centered.to(W.device)  # (D, C)
 
-    # store
-    M.accuracy.append(acc); M.loss.append(loss)
-    M.trSwtrSb.append(trSwtrSb)
-    M.norm_M_CoV.append(covM); M.norm_W_CoV.append(covW)
-    M.cos_M.append(cosM); M.cos_W.append(cosW)
-    M.W_M_dist.append(W_M_dist); M.NCC_mismatch.append(NCCm)
+    # Column-wise ℓ2 norms
+    Mn = M_c.norm(p=2, dim=0)  # (C,)
+    Wn = W.norm(p=2, dim=0)    # (C,)
 
+    # Coefficient of variation = std / mean
+    covM = (Mn.std(unbiased=False) / (Mn.mean() + eps)).item()
+    covW = (Wn.std(unbiased=False) / (Wn.mean() + eps)).item()
+
+    def coherence(V: torch.Tensor) -> float:
+        """
+        Average off-diagonal magnitude of normalised Gram matrix.
+
+        Steps:
+          1. Compute G = V^T V   (C x C).
+          2. Normalise entire matrix by its L1 norm.
+          3. Zero the diagonal.
+          4. Return average absolute value over off-diagonal entries.
+        """
+        G = V.T @ V  # (C, C)
+        G = G / (G.norm(1, keepdim=True) + 1e-9)
+        G.fill_diagonal_(0.0)
+        return (G.abs().sum() / float(C * (C - 1))).item()
+
+    cosM = coherence(M_c / (Mn + eps))  # normalise each column
+    cosW = coherence(W / (Wn + eps))
+
+    # --- NC-3: distance between normalised W and normalised M_c -------------
+    W_normed  = W / (W.norm() + eps)
+    Mc_normed = M_c / (M_c.norm() + eps)
+    W_M_dist = (W_normed - Mc_normed).norm().pow(2).item()  # Frobenius^2
+
+    # Store
+    M.accuracy.append(acc)
+    M.loss.append(loss)
+    M.trSwtrSb.append(nc1_ratio)
+    M.norm_M_CoV.append(covM)
+    M.norm_W_CoV.append(covW)
+    M.cos_M.append(cosM)
+    M.cos_W.append(cosW)
+    M.W_M_dist.append(W_M_dist)
+    M.NCC_mismatch.append(NCCm)
+
+    # Clean up hook
     handle.remove()
 
-# -----------------------------------------------------------------------------
-# CLI & Main script
-# -----------------------------------------------------------------------------
+
+# =============================================================================
+# CLI & Main
+# =============================================================================
+
 def parse_args():
-    p = argparse.ArgumentParser("Measure NC on a RotNet experiment")
-    p.add_argument('--exp',        required=True, help='experiment name, used to find config/config_<exp>.py')
-    p.add_argument('--exp_dir',    default=None, help='(optional) full path to the experiment directory; overrides experiments/<exp>')
-    p.add_argument('--checkpoint', type=int, default=0, help='epoch id of model_net_epochXX to load')
-    # p.add_argument('--batch-size', type=int, default=256) #we don't really use this 
-    p.add_argument('--workers',    type=int, default=4)
-    p.add_argument('--no_cuda',    action='store_true')
-    p.add_argument('--start-epoch', type=int, default=1, help='first epoch to measure (inclusive)')
-    p.add_argument('--end-epoch',   type=int, default=None, help='last epoch to measure (inclusive)')
-    p.add_argument('--metricEval',  type=str,default=None,help='Name of evaluation metric (for non-rotation / non-gaussian-blur experiments)')
+    p = argparse.ArgumentParser("Measure Neural Collapse metrics on an experiment (raw PyTorch)")
+    p.add_argument(
+        '--exp', required=True,
+        help='Experiment name, used to find config/<exp>.py and experiments/<exp>/'
+    )
+    p.add_argument(
+        '--exp-dir', default=None,
+        help='(optional) full path to the experiment directory; '
+             'overrides experiments/<exp>'
+    )
+    p.add_argument(
+        '--checkpoint', type=int, default=None,
+        help='If set, analyse ONLY this epoch ID (e.g. 200).'
+    )
+    p.add_argument(
+        '--start-epoch', type=int, default=None,
+        help='First epoch to analyse (inclusive).'
+    )
+    p.add_argument(
+        '--end-epoch', type=int, default=None,
+        help='Last epoch to analyse (inclusive).'
+    )
+    p.add_argument(
+        '--split', type=str, default='train', choices=['train', 'test'],
+        help='Which data split to use (train/test).'
+    )
+    p.add_argument(
+        '--workers', type=int, default=4,
+        help='Dataloader workers.'
+    )
+    p.add_argument(
+        '--no_cuda', action='store_true',
+        help='Force CPU evaluation even if a GPU is visible.'
+    )
+    p.add_argument(
+        '--net-key', type=str, default='model',
+        help="Key in config['networks'] to treat as the primary model "
+             "(default: 'model')."
+    )
+    p.add_argument(
+        '--feat-module-name', type=str, default=None,
+        help="Optional: name of a module in model.named_modules() whose "
+             "OUTPUT should be used as the feature layer. If omitted, "
+             "the INPUT to the last nn.Linear is used (penultimate features)."
+    )
+    p.add_argument(
+        '--arch-class', type=str, default=None,
+        help="Optional: explicit class name inside def_file for the model "
+             "architecture. If omitted, we try config['networks'][net_key]['arch'] "
+             "or fall back to the def_file stem."
+    )
+    p.add_argument(
+        '--ckpt-glob', type=str, default=None,
+        help="Glob pattern (relative to exp_dir) for checkpoint files, e.g. "
+             "'model_net_epoch*'. If omitted, defaults to "
+             \"f'{net_key}_net_epoch*'\"."
+    )
     return p.parse_args()
 
-if __name__=='__main__':
 
+if __name__ == '__main__':
     args = parse_args()
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-    if not use_cuda:                       # i.e. you passed --no_cuda
-        _orig_load = torch.load
-        torch.load = lambda f, **kw: _orig_load(f, map_location=torch.device('cpu'))
-    set_seed(42)
-    
 
-    # 1) load config
-    cfg_file = Path('config')/f"{args.exp}.py"
+    use_cuda = (not args.no_cuda) and torch.cuda.is_available()
+    if not use_cuda:
+        # if we force CPU, override torch.load to map all checkpoints to CPU
+        _orig_load = torch.load
+        torch.load = lambda f, **kw: _orig_load(
+            f, map_location=torch.device('cpu'), **kw
+        )
+
+    set_seed(42)
+
+    # -------------------------------------------------------------------------
+    # 1) Load config module
+    # -------------------------------------------------------------------------
+    cfg_file = Path('config') / f"{args.exp}.py"
+    if not cfg_file.is_file():
+        raise FileNotFoundError(f"Config file not found: {cfg_file}")
+
     spec = importlib.util.spec_from_file_location("cfg", cfg_file)
     cfg_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(cfg_mod)
+    spec.loader.exec_module(cfg_mod)  # type: ignore
     config = cfg_mod.config
-    if args.exp_dir:
+
+    # Experiment directory (where checkpoints live)
+    if args.exp_dir is not None:
         exp_dir = Path(args.exp_dir)
     else:
-       exp_dir = Path('experiments') / args.exp    
+        exp_dir = Path('experiments') / args.exp
     config['exp_dir'] = str(exp_dir)
 
-    # 2) build loader
-    from dataloader import GenericDataset, DataLoader as RotLoader
-    dt = config['data_train_opt']
-    metric_args={}
-    pretext_mode=dt.get('pretext_mode', 'rotation')
+    if not exp_dir.is_dir():
+        raise FileNotFoundError(f"Experiment directory not found: {exp_dir}")
 
-    if pretext_mode == 'gaussian_blur': 
-        metric_args['kernel_sizes']=dt.get('kernel_sizes')
-    elif pretext_mode == 'gaussian_noise': 
-        metric_args['sigmas']=dt.get('sigmas')
-    
-    if args.metricEval is not None: 
-        metric_args['metricEval'] = args.metricEval
-    
-    batch_size=dt['batch_size']
-    #trying to fix issue with measurements not properly pulling results from 
-    ds_train = GenericDataset(
-        dataset_name=dt['dataset_name'],
-        split=dt['split'],
-        random_sized_crop=dt['random_sized_crop'],
-        num_imgs_per_cat=dt.get('num_imgs_per_cat'),
-        pretext_mode=pretext_mode,
-        **metric_args,
-    )
+    # -------------------------------------------------------------------------
+    # 2) Build dataset & loader using chosen split
+    # -------------------------------------------------------------------------
+    from dataloader import GenericDataset, DataLoader as RotLoader
+
+    if args.split == 'train':
+        dt = config['data_train_opt']
+    else:
+        dt = config['data_test_opt']
+
+    # Build kwargs for GenericDataset in a generic way:
+    # keep everything except batch_size / unsupervised / epoch_size
+    dataset_kwargs = {
+        k: v for k, v in dt.items()
+        if k not in ('batch_size', 'unsupervised', 'epoch_size')
+    }
+
+    ds = GenericDataset(**dataset_kwargs)
+
     loader = RotLoader(
-        dataset=ds_train,
-        unsupervised=dt['unsupervised'],
-        epoch_size=dt['epoch_size'],
+        dataset=ds,
+        unsupervised=dt.get('unsupervised', False),
+        epoch_size=dt.get('epoch_size', None),
         num_workers=args.workers,
         shuffle=False
     )(0)
-    dc = config['networks']['model']['opt']
-    C = dc.get('num_classes', 4)  # RotNet 4 rotations
-    feat_layer = config.get('feature_layer', 'encoder')
 
-    # 3) instantiate alg + load checkpoint
-    import algorithms as alg
-    algo = getattr(alg, config['algorithm_type'])(config)
-    if use_cuda:
-        algo.load_to_gpu()
-    algo.load_checkpoint(args.checkpoint, train=False)
+    # Build evaluation loss
+    loss_fn = build_loss_from_config(config)
 
-    # figure out which epochs to process
-    exp_dir = Path(config['exp_dir'])
-    # grab all "model_net_epochXX" files and extract XX
-    all_files = list(exp_dir.glob('*_net_epoch*'))
-    all_epochs = sorted(int(f.stem.split('epoch')[-1]) for f in all_files)
-    start = args.start_epoch
-    end   = args.end_epoch or max(all_epochs)
-    epoch_list = [e for e in all_epochs if start <= e <= end]
-    if not epoch_list:
-        raise RuntimeError(f"No checkpoints found in {exp_dir} between epochs {start}–{end}")
+    # -------------------------------------------------------------------------
+    # 3) Discover checkpoints and map epoch -> path
+    # -------------------------------------------------------------------------
+    pattern = args.ckpt_glob or f"{args.net_key}_net_epoch*"
+    ckpt_files = list(exp_dir.glob(pattern))
+    if not ckpt_files:
+        raise RuntimeError(
+            f"No checkpoints found in {exp_dir} matching pattern '{pattern}'."
+        )
 
-    # 4) measure over all epochs
+    epoch_to_path: Dict[int, Path] = {}
+    for f in ckpt_files:
+        stem = f.stem  # e.g. 'model_net_epoch200'
+        try:
+            ep_str = stem.split('epoch')[-1]
+            epoch = int(ep_str)
+            epoch_to_path[epoch] = f
+        except ValueError:
+            continue
+
+    if not epoch_to_path:
+        raise RuntimeError(
+            f"Could not parse any epoch numbers from checkpoints in {exp_dir} "
+            f"matching pattern '{pattern}'."
+        )
+
+    all_epochs = sorted(epoch_to_path.keys())
+    min_epoch, max_epoch = min(all_epochs), max(all_epochs)
+
+    # -------------------------------------------------------------------------
+    # 4) Determine which epochs to process based on CLI args
+    # -------------------------------------------------------------------------
+    if args.checkpoint is not None:
+        if args.checkpoint not in all_epochs:
+            raise RuntimeError(
+                f"Requested checkpoint epoch {args.checkpoint} not found "
+                f"in {exp_dir}; available: {all_epochs}"
+            )
+        epoch_list = [args.checkpoint]
+    elif args.start_epoch is not None or args.end_epoch is not None:
+        start = args.start_epoch if args.start_epoch is not None else min_epoch
+        end   = args.end_epoch   if args.end_epoch   is not None else max_epoch
+        epoch_list = [e for e in all_epochs if start <= e <= end]
+        if not epoch_list:
+            raise RuntimeError(
+                f"No checkpoints found between epochs {start}–{end} "
+                f"in {exp_dir}"
+            )
+    else:
+        epoch_list = all_epochs
+
+    print(f"[Measurement] Found epochs: {all_epochs}")
+    print(f"[Measurement] Analysing epochs: {epoch_list}")
+
+    # -------------------------------------------------------------------------
+    # 5) Measure over epochs
+    # -------------------------------------------------------------------------
     metrics = Measurements()
+    batch_size = dt.get('batch_size', 0)
+
+    last_model: Optional[nn.Module] = None
+
     for e in epoch_list:
         print(f"\n[Measurement] Loading checkpoint epoch {e}")
-        algo.load_checkpoint(e, train=False)
-        # pull out the nn.Module exactly as before...
-        # (your existing fallback logic that sets `model` from `algo`)
-        model = None
-        if hasattr(algo, 'networks'):
-            for k,v in algo.networks.items():
-                if isinstance(v, nn.Module):
-                    model = v; break
-        if model is None:
-            for name in ('model','net'):
-                cand = getattr(algo, name, None)
-                if isinstance(cand, nn.Module):
-                    model = cand; break
-        if model is None:
-            raise RuntimeError("Couldn't find a torch.nn.Module in algo")
+        ckpt_path = epoch_to_path[e]
 
-        # now compute and append a single point
-        compute_metrics(metrics, model, loader, C, feat_layer)
+        # Build fresh model
+        model = build_fresh_model(
+            config=config,
+            net_key=args.net_key,
+            arch_class=args.arch_class,
+            use_cuda=use_cuda
+        )
 
-    # 5) save  plot curves vs epoch_list (instead of len=1)
-    save_dir = Path('results')/f"{args.exp}_{type(model).__name__}"/f"bs{batch_size}_epochs{start}-{end}"
-    (save_dir/'plots').mkdir(parents=True, exist_ok=True)
-    with open(save_dir/'metrics.pkl','wb') as f:
+        # Load state dict
+        state = torch.load(ckpt_path, map_location='cpu')
+        if isinstance(state, dict) and 'state_dict' in state:
+            model.load_state_dict(state['state_dict'])
+        else:
+            model.load_state_dict(state)
+
+        if use_cuda:
+            model = model.cuda()
+
+        # Infer number of classes C for NC metrics
+        C = infer_num_classes(model, config, args.net_key)
+
+        # Compute & append metrics for this epoch
+        compute_metrics(
+            M=metrics,
+            model=model,
+            loader=loader,
+            C=C,
+            loss_fn=loss_fn,
+            feat_module_name=args.feat_module_name,
+        )
+
+        last_model = model
+
+    if last_model is None:
+        raise RuntimeError("No models were evaluated; something went wrong.")
+
+    # -------------------------------------------------------------------------
+    # 6) Save metrics & plots
+    # -------------------------------------------------------------------------
+    save_dir = (
+        Path('results')
+        / f"{args.exp}_{type(last_model).__name__}"
+        / f"bs{batch_size}_epochs{epoch_list[0]}-{epoch_list[-1]}_{args.split}"
+    )
+    (save_dir / 'plots').mkdir(parents=True, exist_ok=True)
+
+    with open(save_dir / 'metrics.pkl', 'wb') as f:
         pickle.dump({'epochs': epoch_list, 'metrics': metrics}, f)
 
-    # plotting
+    # Simple 1D curves vs epoch
     for name in vars(metrics):
+        curve = getattr(metrics, name)
+        if not curve:
+            continue
         plt.figure()
-        plt.plot(epoch_list, getattr(metrics, name), 'bx-')
+        plt.plot(epoch_list, curve, 'bx-')
         plt.xlabel('epoch')
         plt.ylabel(name)
         plt.title(f"{name} vs epoch")
         plt.tight_layout()
-        plt.savefig(save_dir/'plots'/f"{name}.pdf")
+        plt.savefig(save_dir / 'plots' / f"{name}.pdf")
         plt.close()
 
-    print("✓  Done – results in", save_dir)
+    print("✓ Done – results in", save_dir)
