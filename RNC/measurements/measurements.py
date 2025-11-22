@@ -8,6 +8,11 @@ NC2     = CoV of class norm means (M) and weights (W) plus average off diagonal 
 NC3     = || W / ||W||_F - M_c / ||M_c||_F ||_F^2
 NCC Mismatch = 1 -P(argmax(net) == argmin NCC-distance)
 
+
+python measurements.py --exp CIFAR10_RotNet_NIN4blocks --ckpt-glob "model_net_epoch*"
+--arch-class NetworkInNetwork
+
+
 """
 
 import argparse 
