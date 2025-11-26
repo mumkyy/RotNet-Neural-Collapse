@@ -89,14 +89,10 @@ class MyDataset(Dataset):
 
 def getLoaders(patch_dim,gap,batch_size,num_workers,root):
 
-  imagenette_dir = os.path.join(root, "imagenette2") 
-  dflag = not os.path.isdir(imagenette_dir)
-
-
   train_data = datasets.Imagenette(
     root=root,
     split="train",
-    download=dflag,
+    download=True,
     transform=None,    
     size="160px"
   )
