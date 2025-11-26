@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-from torchvision.transforms import v2
+from torchvision import transforms
 from torchvision import datasets
 import os
 
@@ -106,7 +106,7 @@ def getLoaders(patch_dim,gap,batch_size,num_workers,root):
       size="full"
   )
 
-  tf = v2.Compose([v2.ToTensor(),v2.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])
+  tf = transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])
 
   train_set = MyDataset(patch_dim=patch_dim,gap=gap,base_ds=train_data,transform=tf)
   train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers)
