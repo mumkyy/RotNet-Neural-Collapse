@@ -109,7 +109,6 @@ def getLoaders(patch_dim,gap,batch_size,num_workers,root):
 
   tf = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True),v2.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])
 
-
   train_set = MyDataset(patch_dim=patch_dim,gap=gap,base_ds=train_data,transform=tf)
   train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
