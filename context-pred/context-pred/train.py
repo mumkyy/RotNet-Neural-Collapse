@@ -31,6 +31,8 @@ def main():
   train_opt = cfg["data_train_opt"]
   net_cfg   = cfg["networks"]["model"]
 
+  root = train_opt["dataset_root"]
+
   batch_size  = train_opt["batch_size"]
   patch_dim   = train_opt["patch_dim"]
   gap         = train_opt["gap"]
@@ -43,6 +45,7 @@ def main():
 
   optim_cfg = net_cfg["optim_params"]
   opt_type = optim_cfg.get("optim_type", "sgd").lower()
+
 
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -80,7 +83,7 @@ def main():
   
   scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.3)
 
-  trainloader, valloader = getLoaders(patch_dim,gap,batch_size,num_workers)
+  trainloader, valloader = getLoaders(patch_dim,gap,batch_size,num_workers,root)
 
   os.makedirs("checkpoints", exist_ok=True)
 

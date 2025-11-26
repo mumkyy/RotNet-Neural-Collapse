@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from torchvision.transforms import v2
 from torchvision import datasets
+import os
 
 
 
@@ -85,19 +86,22 @@ class MyDataset(Dataset):
     return uniform_patch, random_patch, random_patch_label
 
 
-def getLoaders(patch_dim,gap,batch_size,num_workers):
+def getLoaders(patch_dim,gap,batch_size,num_workers,root):
+
+  dflag = not os.path.isdir(root)
+
   train_data = datasets.Imagenette(
-    root="./data",
+    root=root,
     split="train",
-    download=True,
+    download=dflag,
     transform=None,    
     size="full"
   )
 
   val_data = datasets.Imagenette(
-      root="./data",
+      root=root,
       split="val",
-      download=True,
+      download=dflag,
       transform=None,
       size="full"
   )
