@@ -85,15 +85,15 @@ def main():
 
   trainloader, valloader = getLoaders(patch_dim,gap,batch_size,num_workers,root)
 
-  os.makedirs("checkpoints", exist_ok=True)
-
+  checkpoint_dir = f"checkpoints/{args.config}"
+  os.makedirs(checkpoint_dir, exist_ok=True)
   ############################
   # Training/Validation Engine
   ############################
 
   global_trn_loss = []
   global_val_loss = []
-  # previous_val_loss = 100
+  global_val_acc  = []
 
   for epoch in range(num_epochs):
       train_running_loss = []
@@ -142,36 +142,55 @@ def main():
         print('Val Progress --- total:{}, correct:{}'.format(total, correct))
         print(f'Val Accuracy: {100 * correct / total:.2f}%')
 
-      global_trn_loss.append(sum(train_running_loss) / len(train_running_loss))
-      global_val_loss.append(sum(val_running_loss) / len(val_running_loss))
+      val_acc = 100 * correct / total
+      avg_train_loss = sum(train_running_loss) / len(train_running_loss)
+      avg_val_loss = sum(val_running_loss) / len(val_running_loss)
 
-      scheduler.step(global_val_loss[-1])
+      global_trn_loss.append(avg_train_loss)
+      global_val_loss.append(avg_val_loss)
+      global_val_acc.append(val_acc)
+
+      scheduler.step(avg_val_loss)
 
       print('Epoch [{}/{}], TRNLoss:{:.4f}, VALLoss:{:.4f}, Time:{:.2f}'.format(
-          epoch + 1, num_epochs, global_trn_loss[-1], global_val_loss[-1],
+          epoch + 1, num_epochs, avg_train_loss, avg_val_loss,
           (time.time() - start_time) / 60))
       
-      if (epoch + 1) % 20 == 0:
-        MODEL_SAVE_PATH = f'checkpoints/{args.config}.pt'
-        torch.save(
-            {
-                'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'loss': loss.item(),
-                'global_trnloss': global_trn_loss,
-                'global_valloss': global_val_loss,
-            },
-            MODEL_SAVE_PATH,
-        )
+      model_save_path = f'{checkpoint_dir}/{epoch+1:03d}.pt'
+      torch.save(
+          {
+              'epoch': epoch + 1,
+              'state_dict': model.state_dict(),
+              'optimizer_state_dict': optimizer.state_dict(),
+              'accuracy': val_acc,
+              'loss': avg_val_loss,
+              'global_trnloss': global_trn_loss,
+              'global_valloss': global_val_loss,
+              'global_val_acc': global_val_acc,
+          },
+          model_save_path,
+      )
+      with open(f'{checkpoint_dir}/metrics.txt', 'a') as f:
+        f.write(f'{epoch+1},{global_trn_loss[-1]},{global_val_loss[-1]},{val_acc}\n')
 
-  plt.plot(range(len(global_trn_loss)), global_trn_loss, label='TRN Loss')
-  plt.plot(range(len(global_val_loss)), global_val_loss, label='VAL Loss')
-  plt.xlabel('Epochs')
+  plot_path = f'{checkpoint_dir}/training_plots.png'
+  plt.figure(figsize=(12, 5))
+  plt.subplot(1, 2, 1)
+  plt.plot(range(1, len(global_trn_loss)+1), global_trn_loss, label='Train Loss', marker='o')
+  plt.plot(range(1, len(global_val_loss)+1), global_val_loss, label='Val Loss', marker='x')
+  plt.xlabel('Epoch')
   plt.ylabel('Loss')
-  plt.title('Training/Validation Loss plot')
+  plt.title('Training / Validation Loss')
   plt.legend()
-  plt.show()
+  plt.subplot(1, 2, 2)
+  plt.plot(range(1, len(global_val_acc)+1), global_val_acc, label='Val Acc', marker='o', color='green')
+  plt.xlabel('Epoch')
+  plt.ylabel('Accuracy (%)')
+  plt.title('Validation Accuracy')
+  plt.legend()
+  plt.tight_layout()
+  plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+  print(f'Plots saved to {plot_path}')
 
 if __name__ == "__main__":
    main()
