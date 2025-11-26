@@ -80,8 +80,9 @@ class MyDataset(Dataset):
     random_patch_label = np.array(random_patch_label).astype(np.int64)
 
     if self.transform:
-      uniform_patch = self.transform(uniform_patch)
-      random_patch = self.transform(random_patch)
+      uniform_patch = self.transform(uniform_patch).clone()
+      random_patch  = self.transform(random_patch).clone()
+
 
     return uniform_patch, random_patch, random_patch_label
 
