@@ -89,22 +89,24 @@ class MyDataset(Dataset):
 
 def getLoaders(patch_dim,gap,batch_size,num_workers,root):
 
-  dflag = not os.path.isdir(root)
+  imagenette_dir = os.path.join(root, "imagenette2") 
+  dflag = not os.path.isdir(imagenette_dir)
+
 
   train_data = datasets.Imagenette(
     root=root,
     split="train",
     download=dflag,
     transform=None,    
-    size="full"
+    size="160px"
   )
 
   val_data = datasets.Imagenette(
       root=root,
       split="val",
-      download=dflag,
+      download=False,
       transform=None,
-      size="full"
+      size="160px"
   )
 
   tf = v2.Compose([v2.ToImage(), v2.ToDtype(torch.float32, scale=True),v2.Normalize(mean=[0.485, 0.456, 0.406],std=[0.229, 0.224, 0.225])])
