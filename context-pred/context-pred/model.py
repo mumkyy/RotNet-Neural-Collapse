@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class AlexNetwork(nn.Module):
-    def __init__(self, aux_logits=False):
+    def __init__(self, num_classes=8, aux_logits=False, **kwargs):
         super(AlexNetwork, self).__init__()
         self.cnn = nn.Sequential(
             nn.Conv2d(3, 96, kernel_size=3, stride=1, padding=1),
@@ -51,7 +51,7 @@ class AlexNetwork(nn.Module):
             nn.Linear(4096, 4096),
             nn.ReLU(inplace=True),
 
-            nn.Linear(4096, 8)
+            nn.Linear(4096, num_classes)
         )
 
     def forward_once(self, x):
