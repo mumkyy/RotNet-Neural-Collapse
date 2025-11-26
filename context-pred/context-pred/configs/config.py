@@ -4,7 +4,7 @@ config = {}
 # set the parameters related to the training and testing set
 data_train_opt = {} 
 data_train_opt['dataset_name'] = 'Imagenette'
-data_train_opt['dataset_root'] = './data/imagenette2'
+data_train_opt['dataset_root'] = './data'
 data_train_opt['split'] = 'train'
 data_train_opt['batch_size'] = batch_size
 data_train_opt['patch_dim'] = 32
