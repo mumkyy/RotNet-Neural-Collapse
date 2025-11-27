@@ -87,13 +87,23 @@ class MyDataset(Dataset):
     return uniform_patch, random_patch, random_patch_label
 
 
-def getLoaders(patch_dim,gap,batch_size,num_workers,root):
+def getLoaders(patch_dim,gap,batch_size,num_workers,root,supervised):
 
+  tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+  
+  possible_dirs = [
+      os.path.join(root, "imagenette2-160"),
+      os.path.join(root, "imagenette2")  
+  ]
+
+  already_there = any(os.path.isdir(d) for d in possible_dirs)
+  download_flag = not already_there
+  
   train_data = datasets.Imagenette(
     root=root,
     split="train",
-    download=True,
-    transform=None,    
+    download=download_flag,
+    transform=(tf if supervised else None),    
     size="160px"
   )
 
@@ -101,17 +111,18 @@ def getLoaders(patch_dim,gap,batch_size,num_workers,root):
       root=root,
       split="val",
       download=False,
-      transform=None,
+      transform=(tf if supervised else None),
       size="160px"
   )
 
-  tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+  if supervised:
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_loader   = DataLoader(val_data, batch_size=batch_size,shuffle=False, num_workers=num_workers)
+  else:
+    train_set = MyDataset(patch_dim=patch_dim,gap=gap,base_ds=train_data,transform=tf)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
-  train_set = MyDataset(patch_dim=patch_dim,gap=gap,base_ds=train_data,transform=tf)
-  train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-
-
-  val_set = MyDataset(patch_dim=patch_dim,gap=gap,base_ds=val_data,transform=tf)
-  val_loader = DataLoader(val_set,batch_size=batch_size,shuffle=False,num_workers=num_workers)
+    val_set = MyDataset(patch_dim=patch_dim,gap=gap,base_ds=val_data,transform=tf)
+    val_loader = DataLoader(val_set,batch_size=batch_size,shuffle=False,num_workers=num_workers)
 
   return train_loader, val_loader

@@ -1,7 +1,7 @@
 import torch
 import torch.optim as optim
 import torch.nn as nn
-from model import AlexNetwork
+from model import AlexNetwork, AlexClassifier
 import numpy as np
 from data import getLoaders
 import time
@@ -31,13 +31,21 @@ def main():
   train_opt = cfg["data_train_opt"]
   net_cfg   = cfg["networks"]["model"]
 
+  arch = net_cfg.get("arch", "AlexNetwork")
+  is_pretext = (arch == "AlexNetwork")
+
   root = train_opt["dataset_root"]
 
   batch_size  = train_opt["batch_size"]
-  patch_dim   = train_opt["patch_dim"]
-  gap         = train_opt["gap"]
   num_epochs  = cfg["max_num_epochs"]
   num_workers = args.num_workers
+
+  if is_pretext:
+    patch_dim = train_opt["patch_dim"]
+    gap       = train_opt["gap"]
+  else:
+    patch_dim = None
+    gap       = None
 
   loss_cfg = cfg.get("criterions", {}).get("loss", {})
   ctype = loss_cfg.get("ctype", "CrossEntropyLoss")
@@ -49,7 +57,12 @@ def main():
 
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-  model = AlexNetwork().to(device)
+  if is_pretext:
+    # context-pred backbone
+    model = AlexNetwork(**net_cfg.get("opt", {})).to(device)
+  else:
+    # downstream classifier
+    model = AlexClassifier(**net_cfg.get("opt", {})).to(device)
 
   #############################################
   # Initialized Optimizer, criterion, scheduler
@@ -83,7 +96,8 @@ def main():
   
   scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.3)
 
-  trainloader, valloader = getLoaders(patch_dim,gap,batch_size,num_workers,root)
+  supervised = not is_pretext
+  trainloader, valloader = getLoaders(patch_dim, gap, batch_size, num_workers, root, supervised)
 
   checkpoint_dir = f"checkpoints/{args.config}"
   os.makedirs(checkpoint_dir, exist_ok=True)
@@ -103,19 +117,32 @@ def main():
 
       #train
       for idx, data in tqdm(enumerate(trainloader), total=len(trainloader)):
-          uniform_patch, random_patch, random_patch_label = data[0].to(device), data[1].to(device), data[2].to(device)
           optimizer.zero_grad()
-          output, output_fc6_uniform, output_fc6_random = model(uniform_patch, random_patch)
+
+          if is_pretext:
+                # (uniform_patch, random_patch, label)
+            uniform_patch, random_patch, labels = data
+            uniform_patch = uniform_patch.to(device)
+            random_patch  = random_patch.to(device)
+            labels        = labels.to(device)
+            output, _, _  = model(uniform_patch, random_patch)
+          else:
+              # (image, label)
+            images, labels = data
+            images = images.to(device)
+            labels = labels.to(device)
+            output = model(images)
+
           if loss_mode == "ce":
-              loss = criterion(output, random_patch_label)
+                loss = criterion(output, labels)
           else:
               # MSE: one-hot targets
               target = torch.zeros_like(output)
-              target.scatter_(1, random_patch_label.unsqueeze(1), 1.0)
+              target.scatter_(1, labels.unsqueeze(1), 1.0)
               loss = criterion(output, target)
+
           loss.backward()
           optimizer.step()
-          
           train_running_loss.append(loss.item())
         
       correct = 0
@@ -125,20 +152,31 @@ def main():
       model.eval()
       with torch.no_grad():
         for idx, data in tqdm(enumerate(valloader), total=len(valloader)):
-          uniform_patch, random_patch, random_patch_label = data[0].to(device), data[1].to(device), data[2].to(device)
-          output, output_fc6_uniform, output_fc6_random = model(uniform_patch, random_patch)
-          if loss_mode == "ce":
-              loss = criterion(output, random_patch_label)
+          if is_pretext:
+            uniform_patch, random_patch, labels = data
+            uniform_patch = uniform_patch.to(device)
+            random_patch  = random_patch.to(device)
+            labels        = labels.to(device)
+            output, _, _  = model(uniform_patch, random_patch)
           else:
-              # MSE: one-hot targets
-              target = torch.zeros_like(output)
-              target.scatter_(1, random_patch_label.unsqueeze(1), 1.0)
-              loss = criterion(output, target)
+            images, labels = data
+            images = images.to(device)
+            labels = labels.to(device)
+            output = model(images)
+
+          if loss_mode == "ce":
+            loss = criterion(output, labels)
+          else:
+            target = torch.zeros_like(output)
+            target.scatter_(1, labels.unsqueeze(1), 1.0)
+            loss = criterion(output, target)
+
           val_running_loss.append(loss.item())
         
           _, predicted = output.max(1)
-          total += random_patch_label.size(0)
-          correct += (predicted == random_patch_label).sum().item()
+          total   += labels.size(0)
+          correct += (predicted == labels).sum().item()
+
         print('Val Progress --- total:{}, correct:{}'.format(total, correct))
         print(f'Val Accuracy: {100 * correct / total:.2f}%')
 
