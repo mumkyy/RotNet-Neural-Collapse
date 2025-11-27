@@ -89,8 +89,13 @@ class MyDataset(Dataset):
 
 def getLoaders(patch_dim,gap,batch_size,num_workers,root,supervised):
 
-  tf = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+  tf = [transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
   
+  if supervised:
+    tf.insert(0,transforms.Resize((160, 160)))
+
+  tf = transforms.Compose(tf)
+
   possible_dirs = [
       os.path.join(root, "imagenette2-160"),
       os.path.join(root, "imagenette2")  
