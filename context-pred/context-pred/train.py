@@ -194,20 +194,15 @@ def main():
           epoch + 1, num_epochs, avg_train_loss, avg_val_loss,
           (time.time() - start_time) / 60))
       
-      model_save_path = f'{checkpoint_dir}/{epoch+1:03d}.pt'
-      torch.save(
-          {
-              'epoch': epoch + 1,
-              'state_dict': model.state_dict(),
-              'optimizer_state_dict': optimizer.state_dict(),
-              'accuracy': val_acc,
-              'loss': avg_val_loss,
-              'global_trnloss': global_trn_loss,
-              'global_valloss': global_val_loss,
-              'global_val_acc': global_val_acc,
-          },
-          model_save_path,
-      )
+      if epoch % 10 == 0:
+        model_save_path = f'{checkpoint_dir}/{epoch+1:03d}.pt'
+        torch.save(
+            {
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+            },
+            model_save_path,
+        )
       with open(f'{checkpoint_dir}/metrics.txt', 'a') as f:
         f.write(f'{epoch+1},{global_trn_loss[-1]},{global_val_loss[-1]},{val_acc}\n')
 
