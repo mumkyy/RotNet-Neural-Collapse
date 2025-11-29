@@ -625,12 +625,21 @@ if __name__ == '__main__':
         else:
             raise ValueError(f"Unsupported context-pred mode '{mode_str}'")
 
-        patch_dim = dt['patch_dim']
+        patch_dim  = dt['patch_dim']
         batch_size = dt['batch_size']
-        root = dt.get('dataset_root', 'data')
-        gap = dt.get('gap', None)
+
+        # dataset_root from context-pred config.
+        # If it's relative (e.g. "data"), interpret it relative to ctx_dir
+        # so we actually look under:  <repo_root>/context-pred/context-pred/data
+        root_cfg = dt.get('dataset_root', 'data')
+        root_path = Path(root_cfg)
+        if not root_path.is_absolute():
+            root_path = ctx_dir / root_path
+        root = str(root_path)
+
+        gap       = dt.get('gap', None)
         chromatic = dt.get('chromatic', True)
-        jitter = dt.get('jitter', True)
+        jitter    = dt.get('jitter', True)
 
         train_loader, val_loader = ctx_mod.get_loaders(
             mode      = mode,
