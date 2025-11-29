@@ -427,7 +427,7 @@ def compute_metrics(
     M.trSwtrSb.append(nc1_ratio)
     M.norm_M_CoV.append(covM)
     M.norm_W_CoV.append(covW)
-    M.cos_M.append(cosM)
+    M.cos_m.append(cosM)
     M.cos_W.append(cosW)
     M.W_M_dist.append(W_M_dist)
     M.NCC_mismatch.append(NCCm)
