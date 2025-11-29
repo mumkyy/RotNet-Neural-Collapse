@@ -255,15 +255,34 @@ def compute_metrics(
     NCC_match = 0
 
     print("[Measurement] PASS 1: computing class means, accuracy, and loss...")
-    for x, y in tqdm(loader, desc="PASS 1", unit="batch"):
-        x, y = x.to(device), y.to(device)
+    for batch in tqdm(loader, desc="PASS 1", unit="batch"):
+        if len(batch) == 2:
+            # Standard classifier: (x, y)
+            x, y = batch
+            x = x.to(device)
+            y = y.to(device)
+            out = model(x)
+        elif len(batch) == 3:
+            # Context-pred pretext: (uniform_patch, random_patch, y)
+            u, r, y = batch
+            u = u.to(device)
+            r = r.to(device)
+            y = y.to(device)
+            out, _, _ = model(u, r)
+        else:
+            raise RuntimeError(f"Unexpected batch structure len={len(batch)}")
 
-        out = model(x)  # (N, C)
         if 'h' not in feats:
             raise RuntimeError(
                 "Feature hook did not run; check feat_module_name and model."
             )
-        h = feats['h'].view(len(x), -1)  # (N, D)
+        h = feats['h'].view(len(y), -1)  # (N, D)
+
+        # if 'h' not in feats:
+        #     raise RuntimeError(
+        #         "Feature hook did not run; check feat_module_name and model."
+        #     )
+        # h = feats['h'].view(len(x), -1)  # (N, D)
 
         # Loss
         if loss_fn is not None:
@@ -301,15 +320,27 @@ def compute_metrics(
 
     # --- PASS 2: within-class scatter (Sw) and NCC mismatch -----------------
     print("[Measurement] PASS 2: computing within-class scatter and NCC mismatch...")
-    for x, y in tqdm(loader, desc="PASS 2", unit="batch"):
-        x, y = x.to(device), y.to(device)
-        out = model(x)
+    for batch in tqdm(loader, desc="PASS 2", unit="batch"):
+        if len(batch) == 2:
+            x, y = batch
+            x = x.to(device)
+            y = y.to(device)
+            out = model(x)
+        elif len(batch) == 3:
+            u, r, y = batch
+            u = u.to(device)
+            r = r.to(device)
+            y = y.to(device)
+            out, _, _ = model(u, r)
+        else:
+            raise RuntimeError(f"Unexpected batch structure len={len(batch)}")
 
         if 'h' not in feats:
             raise RuntimeError(
                 "Feature hook did not run in PASS 2; check feat_module_name."
             )
-        h = feats['h'].view(len(x), -1)  # (N, D)
+        h = feats['h'].view(len(y), -1)  # (N, D)
+
 
         y_cpu = y.cpu()
         for c in range(C):
@@ -510,8 +541,8 @@ if __name__ == '__main__':
 
     if not exp_dir.is_dir():
         raise FileNotFoundError(f"Experiment directory not found: {exp_dir}")
-    
-    
+        
+        
     from dataloader import GenericDataset, DataLoader as RotLoader
 
     if args.split == 'train':
@@ -519,22 +550,75 @@ if __name__ == '__main__':
     else:
         dt = config['data_test_opt']
 
-    # Build kwargs for GenericDataset in a generic way:
-    # keep everything except loader-only flags
-    dataset_kwargs = {
-        k: v for k, v in dt.items()
-        if k not in ('batch_size', 'unsupervised', 'epoch_size', 'dataset_root')
-    }
+    # -------------------------------------------------------------------------
+    # Decide which data pipeline to use:
+    #   - RNC GenericDataset (CIFAR RotNet etc.)
+    #   - context-pred Imagenette patch loader (AlexNetwork pretext)
+    # -------------------------------------------------------------------------
+    is_context_pred = (
+        'dataset_name' in dt
+        and dt['dataset_name'].lower() == 'imagenette'
+        and 'patch_dim' in dt
+    )
 
-    ds = GenericDataset(**dataset_kwargs)
+    if is_context_pred:
+        # Import context-pred's data.py by path and use get_loaders
+        repo_root = Path(__file__).resolve().parents[2]
+        ctx_dir = repo_root / 'context-pred' / 'context-pred'
+        data_py = ctx_dir / 'data.py'
+        if not data_py.is_file():
+            raise FileNotFoundError(f"Context-pred data.py not found at {data_py}")
 
-    loader = RotLoader(
-        dataset=ds,
-        unsupervised=dt.get('unsupervised', False),
-        epoch_size=dt.get('epoch_size', None),
-        num_workers=args.workers,
-        shuffle=False
-    )(0)
+        spec_data = importlib.util.spec_from_file_location("context_pred_data", data_py)
+        ctx_mod = importlib.util.module_from_spec(spec_data)
+        spec_data.loader.exec_module(ctx_mod)  # type: ignore
+
+        # Map mode string -> Modes enum
+        mode_str = dt.get('mode', 'EIGHT').upper()
+        if mode_str == 'QUAD':
+            mode = ctx_mod.Modes.QUAD
+        elif mode_str == 'EIGHT':
+            mode = ctx_mod.Modes.EIGHT
+        else:
+            raise ValueError(f"Unsupported context-pred mode '{mode_str}'")
+
+        patch_dim = dt['patch_dim']
+        batch_size = dt['batch_size']
+        root = dt.get('dataset_root', 'data')
+        gap = dt.get('gap', None)
+        chromatic = dt.get('chromatic', True)
+        jitter = dt.get('jitter', True)
+
+        train_loader, val_loader = ctx_mod.get_loaders(
+            mode      = mode,
+            patch_dim = patch_dim,
+            batch_size= batch_size,
+            num_workers=args.workers,
+            root      = root,
+            gap       = gap,
+            chromatic = chromatic,
+            jitter    = jitter,
+        )
+
+        loader = train_loader if args.split == 'train' else val_loader
+
+    else:
+        # Original RNC path (CIFAR RotNet etc.)
+        dataset_kwargs = {
+            k: v for k, v in dt.items()
+            if k not in ('batch_size', 'unsupervised', 'epoch_size')
+        }
+
+        ds = GenericDataset(**dataset_kwargs)
+
+        loader = RotLoader(
+            dataset=ds,
+            unsupervised=dt.get('unsupervised', False),
+            epoch_size=dt.get('epoch_size', None),
+            num_workers=args.workers,
+            shuffle=False
+        )(0)
+
 
     # Build evaluation loss
     loss_fn = build_loss_from_config(config)
