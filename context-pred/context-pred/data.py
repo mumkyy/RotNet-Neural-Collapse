@@ -19,8 +19,9 @@ class ContextPred(Dataset):
     self.patch_loc_arr = [(1, 1), (1, 2), (1, 3),(2, 1),(2, 3),(3, 1), (3, 2), (3, 3)]
     self.num_locs = len(self.patch_loc_arr)
   
-  def get_patch_from_grid(self, image, patch_dim, loc_index):
+  def get_patch_from_grid(self, image, loc_index):
     image = np.array(image)
+    patch_dim = self.patch_dim
     H, W = image.shape[0], image.shape[1]
 
     gap = self.gap if self.gap is not None else 0
@@ -230,11 +231,13 @@ class QuadContextPred(Dataset):
 def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=None,jitter=None):
 
   tf = [transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
+
+  btf = transforms.Resize((160, 160))
   
   supervised = (mode == Modes.SUPERVISED)
 
   if supervised:
-    tf.insert(0,transforms.Resize((160, 160)))
+    tf.insert(0,btf)
 
   tf = transforms.Compose(tf)
 
@@ -250,7 +253,7 @@ def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=No
     root=root,
     split="train",
     download=download_flag,
-    transform=(tf if supervised else None),    
+    transform=(tf if supervised else btf),    
     size="160px"
   )
 
@@ -258,7 +261,7 @@ def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=No
       root=root,
       split="val",
       download=False,
-      transform=(tf if supervised else None),
+      transform=(tf if supervised else btf),
       size="160px"
   )
 
