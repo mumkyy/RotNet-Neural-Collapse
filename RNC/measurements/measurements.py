@@ -616,6 +616,14 @@ if __name__ == '__main__':
         ctx_mod = importlib.util.module_from_spec(spec_data)
         spec_data.loader.exec_module(ctx_mod)  # type: ignore
 
+        net_cfg = config.get('networks', {}).get(args.net_key, {})
+        def_file_cfg = net_cfg.get('def_file', None)
+        if def_file_cfg in (None, 'model.py', './model.py'):
+            abs_model_path = ctx_dir / 'model.py'
+            if not abs_model_path.is_file():
+                raise FileNotFoundError(f"Expected AlexNetwork model at {abs_model_path}")
+            net_cfg['def_file'] = str(abs_model_path)
+
         # Map mode string -> Modes enum
         mode_str = dt.get('mode', 'EIGHT').upper()
         if mode_str == 'QUAD':
