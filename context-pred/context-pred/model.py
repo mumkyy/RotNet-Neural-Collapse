@@ -155,14 +155,16 @@ class AlexClassifier(nn.Module):
                  backbone_ckpt=None,
                  freeze_backbone=True,
                  head_feat_key="fc6",
-                 input_size=32):
+                 input_size=32,
+                 backbone_num_classes=8,
+                 backbone_patch_dim=32):
         super().__init__()
 
         assert head_feat_key in ["conv1","conv2","conv3","conv4","conv5","conv6","conv7","fc6"]
         self.head_feat_key = head_feat_key
         self.input_size = input_size
 
-        self.backbone = AlexNetwork(num_classes=8)
+        self.backbone = AlexNetwork(num_classes=backbone_num_classes,patch_dim=backbone_patch_dim)
 
         if backbone_ckpt is not None:
             ckpt = torch.load(backbone_ckpt, map_location="cpu")

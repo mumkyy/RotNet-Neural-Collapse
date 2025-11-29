@@ -28,7 +28,9 @@ cls_net_opt = {
     'backbone_ckpt': feat_pretrained_file,   
     'freeze_backbone': True,                 
     'head_feat_key': 'conv4',                  
-    'input_size':    160,                     
+   'input_size': 160,
+    'backbone_num_classes': 8,         
+    'backbone_patch_dim': 32,         
 }
 
 cls_net_optim_params = {
