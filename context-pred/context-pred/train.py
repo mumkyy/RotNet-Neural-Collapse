@@ -3,7 +3,7 @@ import torch.optim as optim
 import torch.nn as nn
 from model import AlexNetwork, AlexClassifier
 import numpy as np
-from data import getLoaders
+from data import get_loaders, Modes
 import time
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -42,10 +42,23 @@ def main():
 
   if is_pretext:
     patch_dim = train_opt["patch_dim"]
-    gap       = train_opt["gap"]
+    gap       = train_opt.get("gap", None)
+
+    # read mode / knobs from config
+    pretext_mode_str = train_opt.get("mode", "EIGHT").upper()
+    if pretext_mode_str == "QUAD":
+      mode = Modes.QUAD
+    else:
+      mode = Modes.EIGHT
+
+    chromatic = train_opt.get("chromatic", True)
+    jitter    = train_opt.get("jitter", True)
   else:
     patch_dim = None
     gap       = None
+    mode      = Modes.SUPERVISED
+    chromatic = None
+    jitter    = None
 
   loss_cfg = cfg.get("criterions", {}).get("loss", {})
   ctype = loss_cfg.get("ctype", "CrossEntropyLoss")
@@ -60,6 +73,7 @@ def main():
   if is_pretext:
     # context-pred backbone
     model = AlexNetwork(**net_cfg.get("opt", {})).to(device)
+    
   else:
     # downstream classifier
     model = AlexClassifier(**net_cfg.get("opt", {})).to(device)
@@ -96,8 +110,16 @@ def main():
   
   scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.3)
 
-  supervised = not is_pretext
-  trainloader, valloader = getLoaders(patch_dim, gap, batch_size, num_workers, root, supervised)
+  trainloader, valloader = get_loaders(
+    mode      = mode,
+    patch_dim = patch_dim,
+    batch_size= batch_size,
+    num_workers=num_workers,
+    root      = root,
+    gap       = gap,
+    chromatic = chromatic,
+    jitter    = jitter,
+  )
 
   checkpoint_dir = f"checkpoints/{args.config}"
   os.makedirs(checkpoint_dir, exist_ok=True)

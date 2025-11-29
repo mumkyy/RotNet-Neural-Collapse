@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 
 class AlexNetwork(nn.Module):
-    def __init__(self, num_classes=8, aux_logits=False,out_feat_keys=None, **kwargs):
+    def __init__(self, num_classes=8, patch_dim=32, aux_logits=False,out_feat_keys=None, **kwargs):
         super(AlexNetwork, self).__init__()
+
+        self.patch_dim = patch_dim
 
         if out_feat_keys is None:
             out_feat_keys = ['conv1','conv2','conv3','conv4','conv5','conv6','conv7','fc6']
@@ -54,21 +56,23 @@ class AlexNetwork(nn.Module):
             nn.MaxPool2d(kernel_size=2, stride=2),  # 8x8 -> 4x4
         )
         
-        # FC layers - adjusted input size for 4x4x256 = 4096
+        # compute spatial size after 3x 2x2 pools
+        S_out = max(1, self.patch_dim // 8)   # floor(P/8)
+
+        in_dim_fc6 = 256 * S_out * S_out
+
         self.fc6 = nn.Sequential(
-            nn.Linear(256 * 4 * 4, 4096),
+            nn.Linear(in_dim_fc6, 4096),
             nn.ReLU(inplace=True),
             nn.LayerNorm(4096),
         )
-        
+
         self.fc = nn.Sequential(
             nn.Linear(2 * 4096, 4096),
             nn.ReLU(inplace=True),
-
             nn.Linear(4096, 4096),
             nn.ReLU(inplace=True),
-
-            nn.Linear(4096, num_classes)
+            nn.Linear(4096, num_classes),
         )
 
         self.cnn = nn.Sequential(
