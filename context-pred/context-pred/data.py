@@ -64,7 +64,7 @@ class ContextPred(Dataset):
     loc_index = index % self.num_locs
 
     img, _ = self.base_ds[img_index]
-    uniform_patch, random_patch, random_patch_label = self.get_patch_from_grid(img, self.patch_dim, loc_index)
+    uniform_patch, random_patch, random_patch_label = self.get_patch_from_grid(img, loc_index)
 
     #convert patches to float
     uniform_patch = uniform_patch.astype(np.float32) / 255.0
