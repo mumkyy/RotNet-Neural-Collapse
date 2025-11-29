@@ -278,15 +278,11 @@ def compute_metrics(
             )
         h = feats['h'].view(len(y), -1)  # (N, D)
 
-        # if 'h' not in feats:
-        #     raise RuntimeError(
-        #         "Feature hook did not run; check feat_module_name and model."
-        #     )
-        # h = feats['h'].view(len(x), -1)  # (N, D)
-
         # Loss
+        
         if loss_fn is not None:
-            total_loss += loss_fn(out, y).item() * len(x)
+            N_batch = y.size(0)
+            total_loss += loss_fn(out, y).item() * N_batch
 
         # Accuracy: argmax over classes
         net_correct += (out.argmax(1).cpu() == y.cpu()).sum().item()
@@ -520,7 +516,54 @@ if __name__ == '__main__':
             f, map_location=torch.device('cpu'), **kw
         )
     set_seed(42)
+    try:
+        from torchvision import datasets, transforms
+        has_imagenette = hasattr(datasets, "Imagenette")
 
+        if not has_imagenette:
+            print("[Warning] torchvision.datasets.Imagenette not found — applying monkey-patch.")
+
+            class Imagenette(datasets.ImageFolder):
+                """
+                Minimal replacement for torchvision.datasets.Imagenette.
+                The dataset root should contain:
+                    imagenette2-160/train/
+                    imagenette2-160/val/
+                """
+
+                def __init__(self, root, split="train", transform=None, size="160px", download=False):
+                    if size not in ("160px", "320px"):
+                        raise ValueError("Imagenette monkey-patch supports size='160px' or '320px'.")
+
+                    # Directory names used by the official dataset
+                    possible_dirs = [
+                        os.path.join(root, "imagenette2-160"),
+                        os.path.join(root, "imagenette2"),
+                        os.path.join(root, "imagenette2-320"),
+                    ]
+
+                    dataset_root = None
+                    for d in possible_dirs:
+                        if os.path.isdir(d):
+                            dataset_root = d
+                            break
+
+                    if dataset_root is None:
+                        raise FileNotFoundError(
+                            "Could not find Imagenette directory under root '{}'. "
+                            "Expected one of: {}".format(root, possible_dirs)
+                        )
+
+                    split_dir = os.path.join(dataset_root, split)
+                    if not os.path.isdir(split_dir):
+                        raise FileNotFoundError(f"Split directory not found: {split_dir}")
+
+                    super().__init__(split_dir, transform=transform)
+
+            datasets.Imagenette = Imagenette
+
+    except Exception as e:
+        print(f"[Warning] Imagenette monkey-patch failed: {e}")
     cfg_root = Path(args.config_root)
     cfg_file = cfg_root / f"{args.exp}.py"
     if not cfg_file.is_file():
