@@ -121,7 +121,9 @@ def main():
     jitter    = jitter,
   )
 
-  checkpoint_dir = f"checkpoints/{args.config}"
+  checkpoint_root = "checkpoints"
+  checkpoint_subdir = os.path.join(*args.config.split("."))  
+  checkpoint_dir = os.path.join(checkpoint_root, checkpoint_subdir)
   os.makedirs(checkpoint_dir, exist_ok=True)
   ############################
   # Training/Validation Engine
