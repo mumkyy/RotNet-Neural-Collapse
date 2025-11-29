@@ -216,7 +216,7 @@ def main():
           epoch + 1, num_epochs, avg_train_loss, avg_val_loss,
           (time.time() - start_time) / 60))
       
-      if (epoch+1) % 10 == 0:
+      if (epoch+1) % 20 == 0:
         model_save_path = f'{checkpoint_dir}/{epoch+1:03d}.pt'
         torch.save(
             {
