@@ -486,6 +486,13 @@ def parse_args():
              "'model_net_epoch*'. If omitted, defaults to "
              "f'{net_key}_net_epoch*'."
     )
+    p.add_argument(
+        '--config-root', type=str, default='config',
+        help='Root directory containing <exp>.py config files '
+             '(default: "./config"). For external projects, pass a path '
+             'like "../context-pred/configs".'
+    )
+
     return p.parse_args()
 
 if __name__ == '__main__': 
@@ -500,10 +507,11 @@ if __name__ == '__main__':
         )
     set_seed(42)
 
-    cfg_file = Path('config')/f"{args.exp}.py"
+    cfg_root = Path(args.config_root)
+    cfg_file = cfg_root / f"{args.exp}.py"
+    if not cfg_file.is_file():
+        raise FileNotFoundError(f"Config file not found: {cfg_file}")
 
-    if not cfg_file.is_file() : 
-        raise FileNotFoundError(f"config file not found : {cfg_file}")
     
     spec = importlib.util.spec_from_file_location("cfg", cfg_file)
     cfg_mod = importlib.util.module_from_spec(spec)
