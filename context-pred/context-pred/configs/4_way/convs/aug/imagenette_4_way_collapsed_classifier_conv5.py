@@ -21,7 +21,7 @@ config['max_num_epochs'] = 100
 
 networks = {}
 
-feat_pretrained_file = './checkpoints/4_way/backbone/imagenette_4_way_collapsed_backbone/200.pt'
+feat_pretrained_file = './checkpoints/4_way/backbone/aug/imagenette_4_way_collapsed_backbone/200.pt'
 
 cls_net_opt = {
     'num_classes':   10,                     
