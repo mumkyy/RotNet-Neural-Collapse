@@ -85,40 +85,38 @@ def build_loss_from_config(config: dict) -> Optional[nn.Module]:
         print(f"[Measurement] Unknown loss type '{ctype}'; using CELoss for evaluation instead")
 
     return nn.CrossEntropyLoss()
-
-
-def infer_num_classes(model: nn.Module, config: dict, not_key: str) -> int: 
-
+def infer_num_classes(model: nn.Module, config: dict, net_key: str) -> int:
     """
-        Check if config['networks'][net_key]['opt']['num_classes'] is present 
-        out_features of the last nn.Linear layer in the model 
-
-        raise a runtime error if C cant be determined
+    Infer number of classes C from either:
+      1) config['networks'][net_key]['opt']['num_classes'], or
+      2) out_features of the last nn.Linear layer in the model.
     """
-    C_cfg = None
-    try: 
-        C_cfg = config.get('networks', {}) \
-                     .get(net_key, {}) \
-                     .get('opt', {}) \
-                     .get('num_classes', None)
+    try:
+        C_cfg = (
+            config.get('networks', {})
+                  .get(net_key, {})
+                  .get('opt', {})
+                  .get('num_classes', None)
+        )
     except Exception:
         C_cfg = None
 
-    if C_cfg is not None: 
+    if C_cfg is not None:
         return int(C_cfg)
-    
+
     last_linear = None
     for m in model.modules():
         if isinstance(m, nn.Linear):
-            last_linear=m
+            last_linear = m
 
     if last_linear is not None:
         return int(last_linear.out_features)
-    
+
     raise RuntimeError(
-        "Could not infer num_classes, no 'num_classes' in config for" 
-        f"net_key= '{net_key}' and no nn.linear layers found in the model"
+        "Could not infer num_classes, no 'num_classes' in config for "
+        f"net_key='{net_key}' and no nn.Linear layers found in the model"
     )
+
 
 def find_classification_layer(model: nn.Module) -> nn.Linear: 
     #this will return the last linear layer of the model
@@ -137,70 +135,55 @@ def find_named_module(model: nn.Module, name: str ) -> nn.Module:
             return m 
     raise RuntimeError(f"could not find module with name {name} in model.named_modules()")
 
-def build_fresh_model (
-    config: dict, 
-    net_key: str, 
-    arch_class: Optional[str], 
+def build_fresh_model(
+    config: dict,
+    net_key: str,
+    arch_class: Optional[str],
     use_cuda: bool,
-) -> nn.Module: 
-    
+) -> nn.Module:
     """
     Instantiate a fresh model according to config['networks'][net_key].
-
-    Expected config structure (very generic):
-
-        networks[net_key] = {
-            'def_file': 'path/to/model_def.py',
-            'opt':      { ... kwargs for constructor ... },
-            'arch':     'ClassNameInFile',   # optional
-            'optim_params': {...}            # ignored here
-        }
-
-    Resolution logic:
-      - def_file: always taken from config (absolute or relative path)
-      - class name:
-          1. CLI --arch-class (highest priority)
-          2. config['networks'][net_key]['arch'] if present
-          3. stem of def_file (e.g. NetworkInNetwork from NetworkInNetwork.py)
     """
-
     net_cfg_all = config.get('networks', {})
-    if net_key not in net_cfg_all: 
+    if net_key not in net_cfg_all:
         raise RuntimeError(
-                f"net_key {net_key} not found in config['networks']"
-                f"available keys list : {list(net_cfg_all())}"
+            f"net_key {net_key} not found in config['networks']; "
+            f"available keys: {list(net_cfg_all.keys())}"
         )
-    
+
     net_cfg = net_cfg_all[net_key]
 
-    def_file = net_cfg['def_file'] #path to architecture file
-    opt_dict = net_cfg.get('opt', {}) #model constructor 
+    def_file = net_cfg['def_file']          # path to architecture file
+    opt_dict = net_cfg.get('opt', {})       # kwargs for model constructor
 
     module_path = Path(def_file)
-    if not module_path.is_file() : 
+    if not module_path.is_file():
         raise FileNotFoundError(f"architecture file {module_path} not found")
-    
-    #dynamically import the model definition file
-    spec_model = importlib.util.spec_from_file_location(module_path.stem, module_path)
 
-    spec_model.loader.exec_module(mod_model)
+    # dynamically import the model definition file
+    spec_model = importlib.util.spec_from_file_location(
+        module_path.stem, module_path
+    )
+    mod_model = importlib.util.module_from_spec(spec_model)
+    spec_model.loader.exec_module(mod_model)  # type: ignore
 
     cls_name = arch_class or net_cfg.get('arch', module_path.stem)
 
-    if not hasattr(mod_model, cls_name): 
+    if not hasattr(mod_model, cls_name):
         raise RuntimeError(
             f"Could not find class '{cls_name}' in {def_file}. "
             "Either pass --arch-class, or add 'arch' to "
             f"config['networks']['{net_key}']."
         )
-    
+
     ModelCls = getattr(mod_model, cls_name)
     model = ModelCls(**opt_dict)
 
-    if use_cuda: 
-        model = model.cuda() 
+    if use_cuda:
+        model = model.cuda()
 
     return model
+
 
 
 @torch.no_grad() 
@@ -237,7 +220,7 @@ def compute_metrics(
 
     model.eval().to(device)
 
-    feats = Dict[str, torch.Tensor] = {}
+    feats: Dict[str, torch.Tensor] = {}
 
     if feat_module_name is None: 
 
@@ -540,7 +523,7 @@ if __name__ == '__main__':
     # keep everything except loader-only flags
     dataset_kwargs = {
         k: v for k, v in dt.items()
-        if k not in ('batch_size', 'unsupervised', 'epoch_size')
+        if k not in ('batch_size', 'unsupervised', 'epoch_size', 'dataset_root')
     }
 
     ds = GenericDataset(**dataset_kwargs)
