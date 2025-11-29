@@ -117,139 +117,130 @@ def infer_num_classes(model: nn.Module, config: dict, not_key: str) -> int:
     
     raise RuntimeError(
         "Could not infer num_classes, no 'num_classes' in config for" 
-        f"net_key= '{net_key}' and no nn.lkinear layers found in the model"
+        f"net_key= '{net_key}' and no nn.linear layers found in the model"
     )
 
-
-
-
-#CHATGPT FROM HERE ON OUT NEED TO CHECK
-
-def find_classification_layer(model: nn.Module) -> nn.Linear:
+def find_classification_layer(model: nn.Module) -> nn.Linear: 
+    #this will return the last linear layer of the model
     cls_layer = None
-    for m in model.modules():
-        if isinstance(m, nn.Linear):
-            cls_layer = m
-    if cls_layer is None:
-        raise RuntimeError("No nn.Linear layer found in the model.")
+    for m in model.modules(): 
+        if isinstance(m, nn.Linear): 
+            cls_layer = m 
+    if cls_layer is None: 
+        raise RuntimeError("No nn.Linear layer found in the model")
     return cls_layer
 
+def find_named_module(model: nn.Module, name: str ) -> nn.Module: 
+    #this will find the .named_modules () like 'layer4'/'block4'/'conv4' etc...
+    for n,m in model.named_modules() : 
+        if n == name: 
+            return m 
+    raise RuntimeError(f"could not find module with name {name} in model.named_modules()")
 
-def find_named_module(model: nn.Module, name: str) -> nn.Module:
-    """
-    Find a module by its .named_modules() name.
-
-    Raises if not found.
-    """
-    for n, m in model.named_modules():
-        if n == name:
-            return m
-    raise RuntimeError(
-        f"Could not find module with name '{name}' in model.named_modules()."
-    )
-
-
-def build_fresh_model(config: dict,
-                      net_key: str,
-                      arch_class: Optional[str],
-                      use_cuda: bool) -> nn.Module:
+def build_fresh_model (
+    config: dict, 
+    net_key: str, 
+    arch_class: Optional[str], 
+    use_cuda: bool,
+) -> nn.Module: 
+    
     """
     Instantiate a fresh model according to config['networks'][net_key].
 
-    Uses:
-      - def_file: path to architecture .py file
-      - opt:      kwargs for model constructor
-      - arch:     optional override for class name in that file
-      - arch_class CLI arg: overrides arch if provided
+    Expected config structure (very generic):
 
-    If neither arch_class nor arch is given, we default to the file stem.
+        networks[net_key] = {
+            'def_file': 'path/to/model_def.py',
+            'opt':      { ... kwargs for constructor ... },
+            'arch':     'ClassNameInFile',   # optional
+            'optim_params': {...}            # ignored here
+        }
+
+    Resolution logic:
+      - def_file: always taken from config (absolute or relative path)
+      - class name:
+          1. CLI --arch-class (highest priority)
+          2. config['networks'][net_key]['arch'] if present
+          3. stem of def_file (e.g. NetworkInNetwork from NetworkInNetwork.py)
     """
+
     net_cfg_all = config.get('networks', {})
-    if net_key not in net_cfg_all:
+    if net_key not in net_cfg_all: 
         raise RuntimeError(
-            f"net_key '{net_key}' not found in config['networks']. "
-            f"Available: {list(net_cfg_all.keys())}"
+                f"net_key {net_key} not found in config['networks']"
+                f"available keys list : {list(net_cfg_all())}"
         )
+    
     net_cfg = net_cfg_all[net_key]
 
-    def_file = net_cfg['def_file']        # e.g. 'architectures/NetworkInNetwork.py'
-    opt_dict = net_cfg.get('opt', {})     # kwargs for model constructor
+    def_file = net_cfg['def_file'] #path to architecture file
+    opt_dict = net_cfg.get('opt', {}) #model constructor 
 
     module_path = Path(def_file)
-    if not module_path.is_file():
-        raise FileNotFoundError(f"def_file not found: {module_path}")
+    if not module_path.is_file() : 
+        raise FileNotFoundError(f"architecture file {module_path} not found")
+    
+    #dynamically import the model definition file
+    spec_model = importlib.util.spec_from_file_location(module_path.stem, module_path)
 
-    spec_model = importlib.util.spec_from_file_location(
-        module_path.stem, module_path
-    )
-    mod_model = importlib.util.module_from_spec(spec_model)
-    spec_model.loader.exec_module(mod_model)  # type: ignore
+    spec_model.loader.exec_module(mod_model)
 
-    # Determine class name: CLI overrides config, config overrides stem
     cls_name = arch_class or net_cfg.get('arch', module_path.stem)
-    if not hasattr(mod_model, cls_name):
+
+    if not hasattr(mod_model, cls_name): 
         raise RuntimeError(
             f"Could not find class '{cls_name}' in {def_file}. "
-            "Either pass --arch-class, or add 'arch' to config['networks'][net_key]."
+            "Either pass --arch-class, or add 'arch' to "
+            f"config['networks']['{net_key}']."
         )
+    
     ModelCls = getattr(mod_model, cls_name)
     model = ModelCls(**opt_dict)
-    if use_cuda:
-        model = model.cuda()
+
+    if use_cuda: 
+        model = model.cuda() 
+
     return model
 
 
-# =============================================================================
-# NC Metric Computation
-# =============================================================================
-
-@torch.no_grad()
-def compute_metrics(
-    M: Measurements,
+@torch.no_grad() 
+def compute_metrics( 
+    M:Measurements,
     model: nn.Module,
     loader: torch.utils.data.DataLoader,
     C: int,
     loss_fn: Optional[nn.Module],
-    feat_module_name: Optional[str] = None,
-) -> None:
+    feat_module_name: Optional[str] = None, 
+    
+) -> None: 
+    
     """
-    Compute NC metrics, loss, accuracy for a single model (single epoch).
+    
+    Compute NC metrics, loss, and accuracy for a single model (single epoch).
 
-    Parameters
-    ----------
-    M : Measurements
-        Container to which metric scalars for this epoch are appended.
+    Assumptions (kept very generic but explicit):
+      - model:   x -> logits of shape (N, C), classification-style.
+      - loader:  yields (x, y) where y are integer labels in [0, C-1].
+      - there is an nn.Linear classification head with out_features = C.
 
-    model : nn.Module
-        End-to-end model that maps x -> logits of shape (N, C).
+    feat_module_name controls *which* feature layer h we measure NC on:
 
-    loader : DataLoader
-        DataLoader yielding (x, y) where y are integer class labels in [0, C-1].
+      - If feat_module_name is None:
+            use the INPUT to the final nn.Linear (penultimate feature).
+      - If feat_module_name is set:
+            use the OUTPUT of that named module as features, but still
+            use the final classifier weights W for NC2/NC3.
 
-    C : int
-        Number of classes.
-
-    loss_fn : nn.Module or None
-        Evaluation loss function. If None, loss is recorded as NaN.
-
-    feat_module_name : str or None
-        If None:
-            - hook is attached to the *input* of the last nn.Linear layer
-              (penultimate features).
-        If non-None:
-            - hook is attached to the *output* of the module with this name
-              in model.named_modules().
+    
     """
     device = torch.device('cuda' if next(model.parameters()).is_cuda else 'cpu')
+
     model.eval().to(device)
 
-    # -------------------------------------------------------------------------
-    # Set up feature hook
-    # -------------------------------------------------------------------------
-    feats: Dict[str, torch.Tensor] = {}
+    feats = Dict[str, torch.Tensor] = {}
 
-    if feat_module_name is None:
-        # Default: penultimate feature = input to final Linear (classification).
+    if feat_module_name is None: 
+
         cls_layer = find_classification_layer(model)
 
         def hook(module, inp, out):
@@ -258,11 +249,10 @@ def compute_metrics(
 
         handle = cls_layer.register_forward_hook(hook)
     else:
-        # Hook output of a specific named module
+        # Hook the output of a specific named module
         feat_module = find_named_module(model, feat_module_name)
 
         def hook(module, inp, out):
-            # out should be (N, D) or something flattenable per sample
             if isinstance(out, torch.Tensor):
                 feats['h'] = out.detach().cpu().view(out.size(0), -1)
             else:
@@ -273,12 +263,10 @@ def compute_metrics(
 
         handle = feat_module.register_forward_hook(hook)
 
-    # -------------------------------------------------------------------------
-    # PASS 1: class means, loss, accuracy
-    # -------------------------------------------------------------------------
+    # --- PASS 1: class means, loss, accuracy --------------------------------
     N_per_class = torch.zeros(C, dtype=torch.long)
     sum_per_class: List[Optional[torch.Tensor]] = [None for _ in range(C)]
-    total_ss = 0.0  # used later for trace(Sw)
+    total_ss = 0.0      # accumulates squared distances for trace(Sw)
     total_loss = 0.0
     net_correct = 0
     NCC_match = 0
@@ -287,21 +275,21 @@ def compute_metrics(
     for x, y in tqdm(loader, desc="PASS 1", unit="batch"):
         x, y = x.to(device), y.to(device)
 
-        out = model(x)  # expected shape: (N, C)
+        out = model(x)  # (N, C)
         if 'h' not in feats:
             raise RuntimeError(
                 "Feature hook did not run; check feat_module_name and model."
             )
         h = feats['h'].view(len(x), -1)  # (N, D)
 
-        # Loss (if defined)
+        # Loss
         if loss_fn is not None:
             total_loss += loss_fn(out, y).item() * len(x)
 
         # Accuracy: argmax over classes
         net_correct += (out.argmax(1).cpu() == y.cpu()).sum().item()
 
-        # Accumulate per-class sums for means
+        # Accumulate per-class sums
         y_cpu = y.cpu()
         for c in range(C):
             idx = (y_cpu == c).nonzero(as_tuple=False).squeeze(1)
@@ -319,9 +307,8 @@ def compute_metrics(
     for c in range(C):
         n_c = int(N_per_class[c].item())
         if n_c == 0:
-            # No samples from this class in loader; this is usually an error
             raise RuntimeError(
-                f"Class {c} has N_per_class=0; the data split does not contain "
+                f"Class {c} has N_per_class=0; data split does not contain "
                 "all classes, cannot compute NC metrics robustly."
             )
         means.append(sum_per_class[c] / float(n_c))  # type: ignore
@@ -329,9 +316,7 @@ def compute_metrics(
     Mmat = torch.stack(means, dim=1)  # D x C
     muG  = Mmat.mean(dim=1, keepdim=True)  # D x 1
 
-    # -------------------------------------------------------------------------
-    # PASS 2: within-class scatter (trace(Sw)) and NCC mismatch
-    # -------------------------------------------------------------------------
+    # --- PASS 2: within-class scatter (Sw) and NCC mismatch -----------------
     print("[Measurement] PASS 2: computing within-class scatter and NCC mismatch...")
     for x, y in tqdm(loader, desc="PASS 2", unit="batch"):
         x, y = x.to(device), y.to(device)
@@ -352,22 +337,20 @@ def compute_metrics(
             hc = h[idx]  # (n_c, D)
             z = hc - means[c]  # centered features
 
-            # Accumulate squared distances ||x - μ_y||^2 for trace(Sw)
+            # Accumulate ||x - μ_y||^2 for trace(Sw)
             total_ss += z.pow(2).sum(dim=1).sum().item()
 
-            # NCC predictions: nearest class mean (Euclidean distance)
+            # NCC predictions: nearest class mean
             dists = torch.norm(
                 hc.unsqueeze(1) - Mmat.T.unsqueeze(0),
                 dim=2
             )  # (n_c, C)
             NCCp = dists.argmin(dim=1)              # NCC predicted class
-            netp = out[idx].argmax(dim=1).cpu()     # network predicted class
+            netp = out[idx].argmax(dim=1).cpu()     # net predicted class
 
             NCC_match += (NCCp == netp).sum().item()
 
-    # -------------------------------------------------------------------------
-    # Finalize scalar metrics
-    # -------------------------------------------------------------------------
+    # --- Finalize scalar metrics --------------------------------------------
     print("[Measurement] Finalizing metrics for this epoch...")
 
     N = int(N_per_class.sum().item())
@@ -383,11 +366,9 @@ def compute_metrics(
 
     NCCm = 1.0 - NCC_match / float(N)
 
-    # --- NC-1: trace(Sw) / trace(Sb) -----------------------------------------
-    # trace(Sw) = E[||x - μ_y||^2] (already averaged over all samples)
+    # NC-1: trace(Sw) / trace(Sb)
     trace_Sw = total_ss / float(N)
 
-    # Between-class scatter Sb = (1/C) Σ_c (μ_c - μ_G)(μ_c - μ_G)^T
     M_centered = Mmat - muG  # D x C
     Sb = (M_centered @ M_centered.T) / float(C)  # D x D
     trace_Sb = Sb.trace().item()
@@ -395,41 +376,37 @@ def compute_metrics(
     eps = 1e-12
     nc1_ratio = trace_Sw / (trace_Sb + eps)
 
-    # --- NC-2: CoV of norms + coherence --------------------------------------
-    # M_c are centered means per class
-    # W are classifier weights per class
+    # NC-2: CoV of norms + coherence
     cls_layer = find_classification_layer(model)
     W = cls_layer.weight.T  # (D, C)
 
     M_c = M_centered.to(W.device)  # (D, C)
 
-    # Column-wise ℓ2 norms
     Mn = M_c.norm(p=2, dim=0)  # (C,)
     Wn = W.norm(p=2, dim=0)    # (C,)
 
-    # Coefficient of variation = std / mean
     covM = (Mn.std(unbiased=False) / (Mn.mean() + eps)).item()
     covW = (Wn.std(unbiased=False) / (Wn.mean() + eps)).item()
 
     def coherence(V: torch.Tensor) -> float:
         """
-        Average off-diagonal magnitude of normalised Gram matrix.
+        Average off-diagonal magnitude of normalized Gram matrix.
 
         Steps:
-          1. Compute G = V^T V   (C x C).
-          2. Normalise entire matrix by its L1 norm.
-          3. Zero the diagonal.
-          4. Return average absolute value over off-diagonal entries.
+          1. G = V^T V   (C x C)
+          2. Normalize by L1 norm.
+          3. Zero diagonal.
+          4. Return mean |off-diagonal|.
         """
         G = V.T @ V  # (C, C)
         G = G / (G.norm(1, keepdim=True) + 1e-9)
         G.fill_diagonal_(0.0)
         return (G.abs().sum() / float(C * (C - 1))).item()
 
-    cosM = coherence(M_c / (Mn + eps))  # normalise each column
+    cosM = coherence(M_c / (Mn + eps))
     cosW = coherence(W / (Wn + eps))
 
-    # --- NC-3: distance between normalised W and normalised M_c -------------
+    # NC-3: distance between normalized W and normalized M_c
     W_normed  = W / (W.norm() + eps)
     Mc_normed = M_c / (M_c.norm() + eps)
     W_M_dist = (W_normed - Mc_normed).norm().pow(2).item()  # Frobenius^2
@@ -448,20 +425,18 @@ def compute_metrics(
     # Clean up hook
     handle.remove()
 
+def parse_args(): 
+    p = argparse.ArgumentParser(
+        "Measure NC metrics on experiment (raw Pytorch)"
+    )
 
-# =============================================================================
-# CLI & Main
-# =============================================================================
-
-def parse_args():
-    p = argparse.ArgumentParser("Measure Neural Collapse metrics on an experiment (raw PyTorch)")
     p.add_argument(
         '--exp', required=True,
-        help='Experiment name, used to find config/<exp>.py and experiments/<exp>/'
+        help = 'Experiment name, used to find config/<exp>.py and experiments/<exp>/'
     )
     p.add_argument(
         '--exp-dir', default=None,
-        help='(optional) full path to the experiment directory; '
+        help='Optional: full path to the experiment directory; '
              'overrides experiments/<exp>'
     )
     p.add_argument(
@@ -502,41 +477,37 @@ def parse_args():
     p.add_argument(
         '--arch-class', type=str, default=None,
         help="Optional: explicit class name inside def_file for the model "
-             "architecture. If omitted, we try config['networks'][net_key]['arch'] "
+             "architecture. If omitted, use config['networks'][net_key]['arch'] "
              "or fall back to the def_file stem."
     )
     p.add_argument(
         '--ckpt-glob', type=str, default=None,
         help="Glob pattern (relative to exp_dir) for checkpoint files, e.g. "
              "'model_net_epoch*'. If omitted, defaults to "
-             \"f'{net_key}_net_epoch*'\"."
+             "f'{net_key}_net_epoch*'."
     )
     return p.parse_args()
 
+if __name__ == '__main__': 
+    args = parse_args() 
 
-if __name__ == '__main__':
-    args = parse_args()
+    use_cuda = (not args.no_cuda) and torch.cuda.is_available() 
 
-    use_cuda = (not args.no_cuda) and torch.cuda.is_available()
-    if not use_cuda:
-        # if we force CPU, override torch.load to map all checkpoints to CPU
-        _orig_load = torch.load
+    if not use_cuda: 
+        _orig_load = torch.load 
         torch.load = lambda f, **kw: _orig_load(
             f, map_location=torch.device('cpu'), **kw
         )
-
     set_seed(42)
 
-    # -------------------------------------------------------------------------
-    # 1) Load config module
-    # -------------------------------------------------------------------------
-    cfg_file = Path('config') / f"{args.exp}.py"
-    if not cfg_file.is_file():
-        raise FileNotFoundError(f"Config file not found: {cfg_file}")
+    cfg_file = Path('config')/f"{args.exp}.py"
 
+    if not cfg_file.is_file() : 
+        raise FileNotFoundError(f"config file not found : {cfg_file}")
+    
     spec = importlib.util.spec_from_file_location("cfg", cfg_file)
     cfg_mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(cfg_mod)  # type: ignore
+    spec.loader.exec_module(cfg_mod)
     config = cfg_mod.config
 
     # Experiment directory (where checkpoints live)
@@ -548,10 +519,8 @@ if __name__ == '__main__':
 
     if not exp_dir.is_dir():
         raise FileNotFoundError(f"Experiment directory not found: {exp_dir}")
-
-    # -------------------------------------------------------------------------
-    # 2) Build dataset & loader using chosen split
-    # -------------------------------------------------------------------------
+    
+    
     from dataloader import GenericDataset, DataLoader as RotLoader
 
     if args.split == 'train':
@@ -560,7 +529,7 @@ if __name__ == '__main__':
         dt = config['data_test_opt']
 
     # Build kwargs for GenericDataset in a generic way:
-    # keep everything except batch_size / unsupervised / epoch_size
+    # keep everything except loader-only flags
     dataset_kwargs = {
         k: v for k, v in dt.items()
         if k not in ('batch_size', 'unsupervised', 'epoch_size')
@@ -579,9 +548,9 @@ if __name__ == '__main__':
     # Build evaluation loss
     loss_fn = build_loss_from_config(config)
 
-    # -------------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     # 3) Discover checkpoints and map epoch -> path
-    # -------------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     pattern = args.ckpt_glob or f"{args.net_key}_net_epoch*"
     ckpt_files = list(exp_dir.glob(pattern))
     if not ckpt_files:
@@ -608,9 +577,6 @@ if __name__ == '__main__':
     all_epochs = sorted(epoch_to_path.keys())
     min_epoch, max_epoch = min(all_epochs), max(all_epochs)
 
-    # -------------------------------------------------------------------------
-    # 4) Determine which epochs to process based on CLI args
-    # -------------------------------------------------------------------------
     if args.checkpoint is not None:
         if args.checkpoint not in all_epochs:
             raise RuntimeError(
@@ -633,9 +599,6 @@ if __name__ == '__main__':
     print(f"[Measurement] Found epochs: {all_epochs}")
     print(f"[Measurement] Analysing epochs: {epoch_list}")
 
-    # -------------------------------------------------------------------------
-    # 5) Measure over epochs
-    # -------------------------------------------------------------------------
     metrics = Measurements()
     batch_size = dt.get('batch_size', 0)
 
@@ -645,7 +608,7 @@ if __name__ == '__main__':
         print(f"\n[Measurement] Loading checkpoint epoch {e}")
         ckpt_path = epoch_to_path[e]
 
-        # Build fresh model
+        # Build fresh model from config
         model = build_fresh_model(
             config=config,
             net_key=args.net_key,
@@ -680,10 +643,7 @@ if __name__ == '__main__':
 
     if last_model is None:
         raise RuntimeError("No models were evaluated; something went wrong.")
-
-    # -------------------------------------------------------------------------
-    # 6) Save metrics & plots
-    # -------------------------------------------------------------------------
+    
     save_dir = (
         Path('results')
         / f"{args.exp}_{type(last_model).__name__}"
