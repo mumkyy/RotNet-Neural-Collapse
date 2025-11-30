@@ -16,6 +16,7 @@ import logging
 from pdb import set_trace as breakpoint
 
 
+
 class Algorithm():
     def __init__(self, opt):
         self.set_experiment_dir(opt['exp_dir'])
@@ -69,6 +70,7 @@ class Algorithm():
             def_file = val['def_file']
             net_opt = val['opt']
             self.optim_params[key] = val.get('optim_params', None)
+            #i.e.: ../experiments/CIFAR10_RotNet_NIN4blocks.../model_net_epochx
             pretrained_path = val.get('pretrained', None)
             self.networks[key] = self.init_network(def_file, net_opt, pretrained_path, key)
 

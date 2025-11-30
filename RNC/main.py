@@ -75,9 +75,11 @@ def main():
         shuffle=False)
 
     config['disp_step'] = args_opt.disp_step
+    #
     algorithm = getattr(alg, config['algorithm_type'])(config)
     if args_opt.cuda:
         algorithm.load_to_gpu()
+    #passes checkpoint 200 to algorithim 
     if args_opt.checkpoint > 0:
         algorithm.load_checkpoint(args_opt.checkpoint, train=(not args_opt.evaluate))
 
