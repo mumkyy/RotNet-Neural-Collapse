@@ -554,4 +554,56 @@ if __name__ == '__main__':
         for k, v in label_stats.items():
             print(f"{k:>32}: {v:.6f}")
 
+
+    from pathlib import Path
+    import matplotlib.pyplot as plt
+
+    # ensure directory exists
+    save_dir = Path("experiments")
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------
+    # Plot 1: Backbone → Classifier alignment
+    # ------------------------------------------
+    if W2d_c is not None:
+        WA_n = row_normalise(W2d_a)
+        WB_n = row_normalise(W2d_b)
+        WC_n = row_normalise(W2d_c)
+
+        cosA = (WA_n @ WC_n.T).max(dim=1).values.cpu().numpy()
+        cosB = (WB_n @ WC_n.T).max(dim=1).values.cpu().numpy()
+
+        plt.figure(figsize=(8,5))
+        plt.hist(cosA, bins=30, alpha=0.6, label='Collapsed → Classifier')
+        plt.hist(cosB, bins=30, alpha=0.6, label='Not-Collapsed → Classifier')
+        plt.xlabel("Best-match cosine similarity")
+        plt.ylabel("Count")
+        plt.title("Distribution of Alignment: Backbone Conv2 → Classifier Conv2")
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(save_dir / "conv2_alignment_hist.png")
+        plt.close()
+
+    # ------------------------------------------
+    # Plot 2: Principal angle spectrum (A vs B)
+    # ------------------------------------------
+    WA_n = row_normalise(W2d_a)
+    WB_n = row_normalise(W2d_b)
+
+    _, Svals, _ = torch.linalg.svd(
+        (WA_n - WA_n.mean(0)) @ (WB_n - WB_n.mean(0)).T,
+        full_matrices=False
+    )
+    Svals = torch.clamp(Svals, 0.0, 1.0).cpu().numpy()
+    angles = np.degrees(np.arccos(Svals))
+
+    plt.figure(figsize=(8,5))
+    plt.plot(angles, marker='o')
+    plt.xlabel("Principal angle index")
+    plt.ylabel("Angle (degrees)")
+    plt.title("Principal Angle Spectrum: Collapsed vs Not-Collapsed Conv2")
+    plt.tight_layout()
+    plt.savefig(save_dir / "principal_angle_spectrum.png")
+    plt.close()
+
     print("\nDone.")
