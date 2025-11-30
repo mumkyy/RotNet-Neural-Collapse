@@ -19,7 +19,9 @@ def main():
     args_opt = parser.parse_args()
 
     exp_config_file = os.path.join('.', 'config', args_opt.exp + '.py')
-    exp_directory = os.path.join('.', 'experiments', args_opt.exp)
+    config_root_arr = args_opt.exp.split('/')
+    cfg_ROOT = config_root_arr[-1]
+    exp_directory = os.path.join('.', 'experiments', cfg_ROOT)
 
     print('Launching experiment: %s' % exp_config_file)
     spec = importlib.util.spec_from_file_location("config", exp_config_file)
