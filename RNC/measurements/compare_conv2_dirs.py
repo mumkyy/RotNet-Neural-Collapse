@@ -376,6 +376,18 @@ def parse_args():
     p.add_argument('--ckpt-glob-classifier',    type=str, default=None,
                    help="Glob pattern for classifier checkpoints relative to exp_dir, "
                         "e.g. 'classifier_net_epoch*'. If omitted, defaults to f'{net_key}_net_epoch*'.")
+    p.add_argument(
+        '--checkpoint-classifier',
+        type=int,
+        default=None,
+        help='Epoch id to load for classifier exp C; if None, fall back to --checkpoint.'
+    )
+    p.add_argument(
+        '--net-key-classifier',
+        type=str,
+        default='classifier',
+        help='Network key for classifier model (default: classifier)'
+    )
 
     # Shared
     p.add_argument('--checkpoint',   type=int, default=200,
@@ -482,15 +494,23 @@ if __name__ == '__main__':
             exp_dir_c = Path('experiments') / args.exp_c
         if not exp_dir_c.is_dir():
             raise FileNotFoundError(f"Experiment directory C not found: {exp_dir_c}")
-
-        ckpt_c = discover_checkpoint(
-            exp_dir_c, args.net_key, args.checkpoint, args.ckpt_glob_classifier
+        ckpt_epoch_c = (
+            args.checkpoint_classifier
+            if args.checkpoint_classifier is not None
+            else args.checkpoint
         )
+        ckpt_c = discover_checkpoint(
+            exp_dir_c,
+            args.net_key_classifier,
+            ckpt_epoch_c,
+            args.ckpt_glob_classifier,
+        )
+
         print(f"[C] Using checkpoint: {ckpt_c}")
 
         model_c = build_fresh_model(
             config=config_c,
-            net_key=args.net_key,
+            net_key=args.net_key_classifier,
             arch_class=args.arch_class_c,
             use_cuda=use_cuda,
         )
