@@ -339,6 +339,21 @@ def parse_args():
 
     return p.parse_args()
 
+def extract_state_dict(obj):
+    """
+    Handle different checkpoint formats:
+      - {'state_dict': ...}
+      - {'network': ...}
+      - raw state_dict
+    """
+    if not isinstance(obj, dict):
+        return obj
+    if 'state_dict' in obj:
+        return obj['state_dict']
+    if 'network' in obj:
+        return obj['network']
+    # fallback: assume it's already a state_dict-like mapping
+    return obj
 
 # -------------------------------------------------------------------------
 # Main
@@ -375,11 +390,8 @@ if __name__ == '__main__':
     )
 
     state_a = torch.load(ckpt_a, map_location='cpu')
-    if isinstance(state_a, dict) and 'state_dict' in state_a:
-        model_a.load_state_dict(state_a['state_dict'])
-    else:
-        model_a.load_state_dict(state_a)
-
+    sd_a = extract_state_dict(state_a)
+    model_a.load_state_dict(sd_a)
     # ---------------- Experiment B ----------------
     config_b = load_config(args.exp_b)
     if args.exp_dir_b is not None:
@@ -400,11 +412,8 @@ if __name__ == '__main__':
     )
 
     state_b = torch.load(ckpt_b, map_location='cpu')
-    if isinstance(state_b, dict) and 'state_dict' in state_b:
-        model_b.load_state_dict(state_b['state_dict'])
-    else:
-        model_b.load_state_dict(state_b)
-
+    sd_b = extract_state_dict(state_b)
+    model_b.load_state_dict(sd_b)
     # ---------------- Extract conv2 weights ----------------
     name_a, W2d_a = extract_conv2_weights(model_a, conv_index=args.conv_index)
     name_b, W2d_b = extract_conv2_weights(model_b, conv_index=args.conv_index)
