@@ -66,8 +66,6 @@ def load_config(exp: str) -> Dict:
     cfg_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cfg_mod)  # type: ignore
     return cfg_mod.config
-
-
 def build_fresh_model(
     config: dict,
     net_key: str,
@@ -76,8 +74,17 @@ def build_fresh_model(
 ) -> nn.Module:
     """
     Instantiate a fresh model according to config['networks'][net_key].
+
+    Priority:
+      1. If the architecture file defines create_model(), use that
+         (matches RotNet training code and happily accepts net_opt dict).
+      2. Otherwise, construct the class directly, filtering kwargs so we
+         don't pass things like 'num_classes' to a constructor that
+         doesn't accept them.
     """
-    net_cfg_all = config.get('networks', {})
+    import inspect
+
+    net_cfg_all = config.get("networks", {})
     if net_key not in net_cfg_all:
         raise RuntimeError(
             f"net_key {net_key} not found in config['networks']; "
@@ -86,8 +93,8 @@ def build_fresh_model(
 
     net_cfg = net_cfg_all[net_key]
 
-    def_file = net_cfg['def_file']          # path to architecture file
-    opt_dict = net_cfg.get('opt', {})       # kwargs for model constructor
+    def_file = net_cfg["def_file"]        # path to architecture file
+    opt_dict = net_cfg.get("opt", {})     # kwargs / options for model
 
     module_path = Path(def_file)
     if not module_path.is_file():
@@ -100,23 +107,39 @@ def build_fresh_model(
     mod_model = importlib.util.module_from_spec(spec_model)
     spec_model.loader.exec_module(mod_model)  # type: ignore
 
-    cls_name = arch_class or net_cfg.get('arch', module_path.stem)
+    # --- Case 1: use create_model if it exists (RotNet-style) -------
+    if hasattr(mod_model, "create_model") and arch_class is None:
+        model = mod_model.create_model(opt_dict)
+    else:
+        # --- Case 2: fall back to class-based construction ----------
+        cls_name = arch_class or net_cfg.get("arch", module_path.stem)
+        if not hasattr(mod_model, cls_name):
+            raise RuntimeError(
+                f"Could not find class '{cls_name}' in {def_file}. "
+                "Either pass --arch-class, or add 'arch' to "
+                f"config['networks']['{net_key}']."
+            )
 
-    if not hasattr(mod_model, cls_name):
-        raise RuntimeError(
-            f"Could not find class '{cls_name}' in {def_file}. "
-            "Either pass --arch-class, or add 'arch' to "
-            f"config['networks']['{net_key}']."
-        )
+        ModelCls = getattr(mod_model, cls_name)
 
-    ModelCls = getattr(mod_model, cls_name)
-    model = ModelCls(**opt_dict)
+        # Filter opt_dict to only kwargs accepted by __init__
+        sig = inspect.signature(ModelCls)
+        allowed = {
+            name
+            for name, param in sig.parameters.items()
+            if param.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        }
+        filtered_opts = {k: v for k, v in opt_dict.items() if k in allowed}
+
+        model = ModelCls(**filtered_opts)
 
     if use_cuda:
         model = model.cuda()
 
     return model
-
 
 def discover_checkpoint(
     exp_dir: Path,
