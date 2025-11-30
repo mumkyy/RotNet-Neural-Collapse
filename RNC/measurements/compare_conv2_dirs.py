@@ -49,7 +49,7 @@ def flatten_weight_matrix(W: torch.Tensor) -> torch.Tensor:
 
 def row_normalise(W: torch.Tensor) -> torch.Tensor:
     """
-    Row-wise ℓ2 normalisation.
+    Row-wise l2 normalisation.
     """
     return W / (W.norm(dim=1, keepdim=True) + 1e-12)
 
@@ -76,32 +76,24 @@ def build_fresh_model(
 ) -> nn.Module:
     """
     Instantiate a fresh model according to config['networks'][net_key].
-
-    Expected config:
-
-        networks[net_key] = {
-            'def_file': 'path/to/model_def.py',
-            'opt':      { ... kwargs for constructor ... },
-            'arch':     'ClassNameInFile',   # optional
-            'optim_params': {...}            # ignored here
-        }
     """
     net_cfg_all = config.get('networks', {})
     if net_key not in net_cfg_all:
         raise RuntimeError(
-            f"net_key '{net_key}' not found in config['networks']. "
-            f"Available: {list(net_cfg_all.keys())}"
+            f"net_key {net_key} not found in config['networks']; "
+            f"available keys: {list(net_cfg_all.keys())}"
         )
 
     net_cfg = net_cfg_all[net_key]
 
-    def_file = net_cfg['def_file']
-    opt_dict = net_cfg.get('opt', {})
+    def_file = net_cfg['def_file']          # path to architecture file
+    opt_dict = net_cfg.get('opt', {})       # kwargs for model constructor
 
     module_path = Path(def_file)
     if not module_path.is_file():
-        raise FileNotFoundError(f"def_file not found: {module_path}")
+        raise FileNotFoundError(f"architecture file {module_path} not found")
 
+    # dynamically import the model definition file
     spec_model = importlib.util.spec_from_file_location(
         module_path.stem, module_path
     )
@@ -109,6 +101,7 @@ def build_fresh_model(
     spec_model.loader.exec_module(mod_model)  # type: ignore
 
     cls_name = arch_class or net_cfg.get('arch', module_path.stem)
+
     if not hasattr(mod_model, cls_name):
         raise RuntimeError(
             f"Could not find class '{cls_name}' in {def_file}. "
