@@ -135,9 +135,13 @@ def build_fresh_model(
         filtered_opts = {k: v for k, v in opt_dict.items() if k in allowed}
 
         model = ModelCls(**filtered_opts)
-
     if use_cuda:
-        model = model.cuda()
+        try:
+            model = model.cuda()
+        except RuntimeError:
+            print("CUDA unavailable; falling back to CPU.")
+            use_cuda = False
+
 
     return model
 
