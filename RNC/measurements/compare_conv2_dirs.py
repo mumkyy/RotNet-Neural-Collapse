@@ -66,6 +66,8 @@ def load_config(exp: str) -> Dict:
     cfg_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cfg_mod)  # type: ignore
     return cfg_mod.config
+
+
 def build_fresh_model(
     config: dict,
     net_key: str,
@@ -135,15 +137,15 @@ def build_fresh_model(
         filtered_opts = {k: v for k, v in opt_dict.items() if k in allowed}
 
         model = ModelCls(**filtered_opts)
+
     if use_cuda:
         try:
             model = model.cuda()
         except RuntimeError:
             print("CUDA unavailable; falling back to CPU.")
-            use_cuda = False
-
 
     return model
+
 
 def discover_checkpoint(
     exp_dir: Path,
@@ -260,7 +262,7 @@ def principal_angle_stats(WA: torch.Tensor, WB: torch.Tensor) -> Dict[str, float
         "max_cos":    float(S.max().item()),
         "mean_cos":   float(S.mean().item()),
         "median_cos": float(S.median().item()),
-        "min_angle_deg":  float(theta.max().item() * 180.0 / np.pi),  # note: max angle = acos(min_cos)
+        "min_angle_deg":  float(theta.max().item() * 180.0 / np.pi),  # max angle = acos(min_cos)
         "max_angle_deg":  float(theta.min().item() * 180.0 / np.pi),  # min angle = acos(max_cos)
         "mean_angle_deg": float(theta.mean().item() * 180.0 / np.pi),
     }
@@ -299,6 +301,45 @@ def filter_match_stats(WA: torch.Tensor, WB: torch.Tensor) -> Dict[str, float]:
     return out
 
 
+def compare_to_label(WA: torch.Tensor, WB: torch.Tensor, WC: torch.Tensor) -> Dict[str, float]:
+    """
+    Compare two conv subspaces (WA = collapsed, WB = not-collapsed) to a
+    "label" conv space WC (e.g. best-performing classifier conv2).
+
+    WA, WB, WC: (N*, D) matrices (filters × flattened spatial dims)
+    """
+    WA_n = row_normalise(WA)
+    WB_n = row_normalise(WB)
+    WC_n = row_normalise(WC)  # classifier conv2 weights
+
+    # Cosine similarity matrices
+    CollSim    = WA_n @ WC_n.T
+    NotCollSim = WB_n @ WC_n.T
+
+    # Best matches for collapsed vs classifier
+    best_A     = CollSim.max(dim=1).values   # each collapsed filter → best classifier filter
+    best_B     = CollSim.max(dim=0).values   # each classifier filter → best collapsed filter
+
+    # Best matches for not-collapsed vs classifier
+    best_A_not = NotCollSim.max(dim=1).values
+    best_B_not = NotCollSim.max(dim=0).values
+
+    def stats(x: torch.Tensor, prefix: str) -> Dict[str, float]:
+        return {
+            f"{prefix}_mean":   float(x.mean().item()),
+            f"{prefix}_median": float(x.median().item()),
+            f"{prefix}_min":    float(x.min().item()),
+            f"{prefix}_max":    float(x.max().item()),
+        }
+
+    out = {}
+    out.update(stats(best_A,     "Collapsed_to_Classifier"))
+    out.update(stats(best_B,     "Classifier_to_Collapsed"))
+    out.update(stats(best_A_not, "NotCollapsed_to_Classifier"))
+    out.update(stats(best_B_not, "Classifier_to_NotCollapsed"))
+    return out
+
+
 # -------------------------------------------------------------------------
 # CLI
 # -------------------------------------------------------------------------
@@ -324,6 +365,18 @@ def parse_args():
     p.add_argument('--arch-class-b', type=str, default=None,
                    help='Optional architecture class for experiment B.')
 
+    # Experiment C (classifier exp)
+    p.add_argument('--exp-c',        required=False, default=None,
+                   help='Name of experiment C (used to find config/<exp-c>.py)')
+    p.add_argument('--exp-dir-c',    default=None,
+                   help='Optional explicit experiments directory for C; '
+                        'if omitted, use experiments/<exp-c>')
+    p.add_argument('--arch-class-c', type=str, default=None,
+                   help='Optional architecture class for experiment C.')
+    p.add_argument('--ckpt-glob-classifier',    type=str, default=None,
+                   help="Glob pattern for classifier checkpoints relative to exp_dir, "
+                        "e.g. 'classifier_net_epoch*'. If omitted, defaults to f'{net_key}_net_epoch*'.")
+
     # Shared
     p.add_argument('--checkpoint',   type=int, default=200,
                    help='Epoch id to load (e.g. 200).')
@@ -338,6 +391,7 @@ def parse_args():
                    help='Force CPU evaluation even if a GPU is visible.')
 
     return p.parse_args()
+
 
 def extract_state_dict(obj):
     """
@@ -354,6 +408,7 @@ def extract_state_dict(obj):
         return obj['network']
     # fallback: assume it's already a state_dict-like mapping
     return obj
+
 
 # -------------------------------------------------------------------------
 # Main
@@ -392,6 +447,7 @@ if __name__ == '__main__':
     state_a = torch.load(ckpt_a, map_location='cpu')
     sd_a = extract_state_dict(state_a)
     model_a.load_state_dict(sd_a)
+
     # ---------------- Experiment B ----------------
     config_b = load_config(args.exp_b)
     if args.exp_dir_b is not None:
@@ -414,7 +470,39 @@ if __name__ == '__main__':
     state_b = torch.load(ckpt_b, map_location='cpu')
     sd_b = extract_state_dict(state_b)
     model_b.load_state_dict(sd_b)
-    # ---------------- Extract conv2 weights ----------------
+
+    # ---------------- Optional Experiment C (classifier) ----------------
+    W2d_c = None
+    if args.exp_c is not None:
+        config_c = load_config(args.exp_c)
+
+        if args.exp_dir_c is not None:
+            exp_dir_c = Path(args.exp_dir_c)
+        else:
+            exp_dir_c = Path('experiments') / args.exp_c
+        if not exp_dir_c.is_dir():
+            raise FileNotFoundError(f"Experiment directory C not found: {exp_dir_c}")
+
+        ckpt_c = discover_checkpoint(
+            exp_dir_c, args.net_key, args.checkpoint, args.ckpt_glob_classifier
+        )
+        print(f"[C] Using checkpoint: {ckpt_c}")
+
+        model_c = build_fresh_model(
+            config=config_c,
+            net_key=args.net_key,
+            arch_class=args.arch_class_c,
+            use_cuda=use_cuda,
+        )
+
+        state_c = torch.load(ckpt_c, map_location='cpu')
+        sd_c = extract_state_dict(state_c)
+        model_c.load_state_dict(sd_c)
+
+        name_c, W2d_c = extract_conv2_weights(model_c, conv_index=args.conv_index)
+        print(f"\n[C] Conv layer index {args.conv_index}: {name_c}, weight shape {tuple(W2d_c.shape)}")
+
+    # ---------------- Extract conv2 weights (A,B) ----------------
     name_a, W2d_a = extract_conv2_weights(model_a, conv_index=args.conv_index)
     name_b, W2d_b = extract_conv2_weights(model_b, conv_index=args.conv_index)
 
@@ -427,16 +515,23 @@ if __name__ == '__main__':
             f"D_A={W2d_a.shape[1]} vs D_B={W2d_b.shape[1]}"
         )
 
-    # ---------------- Subspace comparison (principal angles) ----------------
+    # ---------------- Subspace comparison (principal angles A vs B) ------
     pa_stats = principal_angle_stats(W2d_a, W2d_b)
-    print("\n=== Principal-angle statistics between conv2 row-spaces ===")
+    print("\n=== Principal-angle statistics between conv2 row-spaces (A vs B) ===")
     for k, v in pa_stats.items():
         print(f"{k:>16}: {v:.6f}")
 
-    # ---------------- Filter-wise best-match cosine similarities ------------ 
+    # ---------------- Filter-wise best-match cosine similarities (A,B) ---
     match_stats = filter_match_stats(W2d_a, W2d_b)
-    print("\n=== Filter-wise best-match cosine similarities ===")
+    print("\n=== Filter-wise best-match cosine similarities (A vs B) ===")
     for k, v in match_stats.items():
         print(f"{k:>16}: {v:.6f}")
+
+    # ---------------- Alignment vs classifier conv2 (if C provided) ------
+    if W2d_c is not None:
+        label_stats = compare_to_label(W2d_a, W2d_b, W2d_c)
+        print("\n=== Alignment of conv2 spaces with classifier conv2 (C) ===")
+        for k, v in label_stats.items():
+            print(f"{k:>32}: {v:.6f}")
 
     print("\nDone.")
