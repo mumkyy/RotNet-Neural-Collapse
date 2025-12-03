@@ -176,7 +176,7 @@ if __name__ == '__main__':
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
             fp.write(f"  stable_rank_fro:  {s['stable_rank_fro']}\n")
             fp.write(f"  soft_rank_nuc:         {s['soft_rank_nuc']}\n")
-            fp.write(f"  rank:         {s['rank']}\n")
+            fp.write(f"  rank_default:         {s['rank_default']}\n")
         fp.write("\n=== All conv + linear blocks ===\n")
         for s in all_block_stats:
             fp.write(f"{s['name']}\n")
@@ -184,6 +184,6 @@ if __name__ == '__main__':
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
             fp.write(f"  stable_rank_fro:  {s['stable_rank_fro']}\n")
             fp.write(f"  soft_rank_nuc:         {s['soft_rank_nuc']}\n")
-            fp.write(f"  rank:         {s['rank']}\n")
+            fp.write(f"  rank_default:         {s['rank_default']}\n")
 
     print(f"\n✓ Weight stats written to {weights_file}\n")
