@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from measurements import Measurements, compute_metrics, parse_args, set_seed
 
 def __main__():
-     args = parse_args()
+    args = parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     if not use_cuda:                       # i.e. you passed --no_cuda
         _orig_load = torch.load
