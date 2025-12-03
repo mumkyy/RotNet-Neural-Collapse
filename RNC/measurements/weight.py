@@ -162,7 +162,8 @@ if __name__ == '__main__':
 
     #path = results/configFile->args._modelTYPE(CNN).__main__/bs(from config)
     save_dir = Path('results') / f"{args.exp}_{type(model).__name__}" / f"bs{batch_size}"
-    (save_dir / 'plots').mkdir(parents=True, exist_ok=True)
+    plots_dir = save_dir / 'plots'
+    plots_dir.mkdir(parents=True, exist_ok=True)    
     #weights file will be saved at results/configFile_CNN.__main__/bs(from_config)/weight_stats_checkpoint
     weights_file = save_dir / f"weight_stats_checkpoint{args.checkpoint}.txt"
     
@@ -185,5 +186,75 @@ if __name__ == '__main__':
             fp.write(f"  stable_rank_fro:  {s['stable_rank_fro']}\n")
             fp.write(f"  soft_rank_nuc:         {s['soft_rank_nuc']}\n")
             fp.write(f"  rank_default:         {s['rank_default']}\n")
+
+    stable_ranks =[]
+    soft_ranks =[]
+    xtick_labels =[]
+    block_ids = []
+    for s in all_block_stats:
+        stable_ranks.append(s['stable_rank_fro'])
+        soft_ranks.append(s['soft_rank_nuc']) 
+        parts = s['name'].split('.')
+        if len(parts) >= 3 and parts[2].startswith("Block"):
+            block_full = parts[2]
+            block, sub = block_full.split('_', 1)
+            use_label = f"{block}\n{sub}"
+            block_id = block
+        else:
+            block_id = "Classifier"
+            use_label = "Classifier"
+
+        xtick_labels.append(use_label)
+        block_ids.append(block_id)
+    
+    x = np.arange(len(stable_ranks))
+    plt.figure(figsize=(12,6))
+
+    ax = plt.gca()
+    ax.plot(x, stable_ranks, marker='o', linewidth=2,markersize=6, label='stable_rank')
+
+    prev_block = block_ids[0]
+    for i , b in enumerate(block_ids[1:] , start =1 ):
+        if b!=prev_block:
+            ax.axvline(i - 0.5, color = 'gray', linestyle='--', alpha=.35)
+        prev_block = b
+
+    ax.set_xticks(x) 
+    ax.set_xticklabels(xtick_labels, fontsize= 8)
+
+    ax.set_xlabel("layer (block + sublayer)")
+    ax.set_ylabel("stable_ranks (fro^2 / spec^2)")
+    ax.set_title("stable rank across all blocks")
+    ax.grid(axis='y', alpha = 0.25)
+
+    plt.tight_layout() 
+    plt.savefig(plots_dir/"stable_rank_allblocks.png", dpi = 150)
+    plt.close() 
+
+    plt.figure(figsize=(12,6))
+
+    bx = plt.gca()
+    bx.plot(x, soft_ranks, marker='o', linewidth=2,markersize=6, label='stable_rank')
+
+    prev_block = block_ids[0]
+    for i , b in enumerate(block_ids[1:] , start =1 ):
+        if b!=prev_block:
+            ax.axvline(i - 0.5, color = 'gray', linestyle='--', alpha=.35)
+        prev_block = b
+
+    bx.set_xticks(x) 
+    bx.set_xticklabels(xtick_labels, fontsize= 8)
+
+    bx.set_xlabel("layer (block + sublayer)")
+    bx.set_ylabel("soft_rank (nuc / spec)")
+    bx.set_title("soft rank across all blocks")
+    bx.grid(axis='y', alpha = 0.25)
+
+    plt.tight_layout() 
+    plt.savefig(plots_dir/"soft_rank_allblocks.png", dpi = 150)
+    plt.close()
+
+
+
 
     print(f"\n✓ Weight stats written to {weights_file}\n")
