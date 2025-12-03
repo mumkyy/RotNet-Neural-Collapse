@@ -208,50 +208,52 @@ if __name__ == '__main__':
         block_ids.append(block_id)
     
     x = np.arange(len(stable_ranks))
-    plt.figure(figsize=(12,6))
 
+    plt.figure(figsize=(14,6))
     ax = plt.gca()
-    ax.plot(x, stable_ranks, marker='o', linewidth=2,markersize=6, label='stable_rank')
+
+    ax.bar(x, stable_ranks, color='steelblue')
 
     prev_block = block_ids[0]
-    for i , b in enumerate(block_ids[1:] , start =1 ):
-        if b!=prev_block:
-            ax.axvline(i - 0.5, color = 'gray', linestyle='--', alpha=.35)
+    for i, b in enumerate(block_ids[1:], start=1):
+        if b != prev_block:
+            ax.axvline(i - 0.5, color='gray', linestyle='--', alpha=0.35)
         prev_block = b
 
-    ax.set_xticks(x) 
-    ax.set_xticklabels(xtick_labels, fontsize= 8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(xtick_labels, fontsize=8)
 
     ax.set_xlabel("layer (block + sublayer)")
-    ax.set_ylabel("stable_ranks (fro^2 / spec^2)")
-    ax.set_title("stable rank across all blocks")
-    ax.grid(axis='y', alpha = 0.25)
+    ax.set_ylabel("stable_rank (||W||_F^2 / ||W||_2^2)")
+    ax.set_title("Stable Rank Across All Blocks")
+    ax.grid(axis='y', alpha=0.25)
 
-    plt.tight_layout() 
-    plt.savefig(plots_dir/"stable_rank_allblocks.png", dpi = 150)
-    plt.close() 
+    plt.tight_layout()
+    plt.savefig(plots_dir/"stable_rank_allblocks_hist.png", dpi=150)
+    plt.close()
 
-    plt.figure(figsize=(12,6))
 
+    plt.figure(figsize=(14,6))
     bx = plt.gca()
-    bx.plot(x, soft_ranks, marker='o', linewidth=2,markersize=6, label='stable_rank')
+
+    bx.bar(x, soft_ranks, color='darkorange')
 
     prev_block = block_ids[0]
-    for i , b in enumerate(block_ids[1:] , start =1 ):
-        if b!=prev_block:
-            ax.axvline(i - 0.5, color = 'gray', linestyle='--', alpha=.35)
+    for i, b in enumerate(block_ids[1:], start=1):
+        if b != prev_block:
+            bx.axvline(i - 0.5, color='gray', linestyle='--', alpha=0.35)
         prev_block = b
 
-    bx.set_xticks(x) 
-    bx.set_xticklabels(xtick_labels, fontsize= 8)
+    bx.set_xticks(x)
+    bx.set_xticklabels(xtick_labels, fontsize=8)
 
     bx.set_xlabel("layer (block + sublayer)")
-    bx.set_ylabel("soft_rank (nuc / spec)")
-    bx.set_title("soft rank across all blocks")
-    bx.grid(axis='y', alpha = 0.25)
+    bx.set_ylabel("soft_rank (||W||_* / ||W||_2)")
+    bx.set_title("Soft Rank Across All Blocks")
+    bx.grid(axis='y', alpha=0.25)
 
-    plt.tight_layout() 
-    plt.savefig(plots_dir/"soft_rank_allblocks.png", dpi = 150)
+    plt.tight_layout()
+    plt.savefig(plots_dir/"soft_rank_allblocks_hist.png", dpi=150)
     plt.close()
 
 
