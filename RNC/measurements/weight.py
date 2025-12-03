@@ -33,15 +33,29 @@ def compute_weight_stats(name: str, module: nn.Module):
     #weight tensor
     W=module.weight 
     #flatten W using cpu for rank calculation
-    W2d = flatten_weight_matrix(W).detach().cpu()
+    W2d = flatten_weight_matrix(W).detach().cpu().to(torch.float32)
     #torch.linalg gets the rank of the flattened matrix
     rank = torch.linalg.matrix_rank(W2d).item()
+    
+    #largest singular value    
+    spectral_Norm = torch.linalg.norm(W2d, ord=2)
+    #sum of singular values 
+    nuclear_Norm = torch.linalg.matrix_norm(W2d, ord='nuc')
+    # 1 <= ||W||* / ||W||2 <= true rank  
+    soft_rank = (nuclear_Norm / spectral_Norm).item() 
+
+
+    # alternative stablerank(W) = (||W||Frubinius norm )^2 / (||W||2)^2 <= true rank 
+    fru_Norm = torch.linalg.matrix_norm(W2d, ord='fru')
+    stable_rank = ((fru_Norm**2) / (spectral_Norm**2)).item()
 
     stats = {
-        "name":         name, 
-        "shape":        tuple(W.shape),
-        "flat_shape":   tuple(W2d.shape),
-        "rank":         rank, 
+        "name":                    name, 
+        "shape":                   tuple(W.shape),
+        "flat_shape":              tuple(W2d.shape),
+        "rank_default":            rank, 
+        "stable_rank_fru":         stable_rank, 
+        "soft_rank_nuc":           soft_rank, 
     }
     return stats
 
@@ -160,14 +174,16 @@ if __name__ == '__main__':
             fp.write(f"{s['name']}\n")
             fp.write(f"  shape:        {s['shape']}\n")
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
+            fp.write(f"  stable_rank_fru:  {s['stable_rank_fru']}\n")
+            fp.write(f"  soft_rank_nuc:         {s['soft_rank_nuc']}\n")
             fp.write(f"  rank:         {s['rank']}\n")
-
         fp.write("\n=== All conv + linear blocks ===\n")
         for s in all_block_stats:
             fp.write(f"{s['name']}\n")
             fp.write(f"  shape:        {s['shape']}\n")
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
+            fp.write(f"  stable_rank_fru:  {s['stable_rank_fru']}\n")
+            fp.write(f"  soft_rank_nuc:         {s['soft_rank_nuc']}\n")
             fp.write(f"  rank:         {s['rank']}\n")
-
 
     print(f"\n✓ Weight stats written to {weights_file}\n")
