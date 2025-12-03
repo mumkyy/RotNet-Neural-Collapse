@@ -93,6 +93,13 @@ class GenericDataset(data.Dataset):
         # available training examplers per category are being used.
         self.num_imgs_per_cat = num_imgs_per_cat
 
+        from maxHamming import generate_maximal_hamming_distance_set
+        #per discussion today
+        self.N_jigsaw =7 
+        P_1based = generate_maximal_hamming_distance_set(self.N_jigsaw, K=4)
+        self.jigsaw_perms = [tuple(x-1 for x in p) for p in P_1based]
+
+
         if self.dataset_name=='imagenet':
             assert(self.split=='train' or self.split=='val')
             self.mean_pix = [0.485, 0.456, 0.406]
@@ -243,34 +250,68 @@ def apply_gaussian_blur(img, sigma=1.0, kernel_size=5):
     blurred = blurred_img = F.gaussian_blur(img_pil, kernel_size=kernel_size, sigma=sigma)
     return np.array(blurred_img).copy()
 
+#TODO test the implementation of the jigsaw
+from typing import List, Tuple
+def four_way_jigsaw(img , aug: List[Tuple]) -> Tuple[np.ndarray, int] : 
+    img_H, img_W, img_C  = img.shape
+    #we want to sub divide into quadrants : cifar 10 32x32 so each quadrant will be 16x16 = HxW
+    assert img_H % 2 == 0 and img_W % 2 == 0
+    q_H, q_W = img_H // 2 , img_W // 2
 
-#TODO: figure out how to concatenate output tensors and how should be fed into model
-#THIS IS THE LOGIC FOR THE QUADRANTS PRETEXT TASK 
-def get_quadrants(img):
-    # img: (C, H, W)
-    C, H, W = img.shape
-    assert H % 2 == 0 and W % 2 == 0, "H and W must be even."
-    mid_H, mid_W = H // 2, W // 2
-    TL = img[:, :mid_H, :mid_W]
-    TR = img[:, :mid_H,  mid_W:]
-    BL = img[:,  mid_H:, :mid_W]
-    BR = img[:,  mid_H:,  mid_W:]
-    return TL, TR, BL, BR
+    #first turn it into 4 patches then append them to a returnable image
+    img_t = torch.from_numpy(img).permute(2,0,1)
 
-ORIENT_MAP = {
-    0: ("TL", "TR"),  # side-to-side top
-    1: ("BL", "BR"),  # side-to-side bottom
-    2: ("TL", "BL"),  # left column
-    3: ("TR", "BR"),  # right column
-    4: ("TR", "BL"),  # diag 1
-    5: ("TL", "BR"),  # diag 2
-}
-def sample_pair_by_orientation(img, orientation):
+    label = random.randrange(len(aug))
+    perm = aug[label]
+
+    quads = [
+        img_t[:, :q_H, :q_W], #0 
+        img_t[:, :q_H,  q_W:], #1
+        img_t[:,  q_H:, :q_W], #2
+        img_t[:,  q_H:, q_W:], #3
+    ]
+
+
+    top  = torch.cat([quads[perm[0]], quads[perm[1]]], dim=2)
+    bot  = torch.cat([quads[perm[2]], quads[perm[3]]], dim=2)
+
+    jig = torch.cat([top, bot], dim = 1)
+
+    jig_np = jig.permute(1,2,0).numpy().copy()
+
+    return jig_np, label
+
+
+
+#IGNORE THIS IMPLEMENTED IN CONTEXT-PRED
+
+# #TODO: figure out how to concatenate output tensors and how should be fed into model
+# #THIS IS THE LOGIC FOR THE QUADRANTS PRETEXT TASK 
+# def get_quadrants(img):
+#     # img: (C, H, W)
+#     C, H, W = img.shape
+#     assert H % 2 == 0 and W % 2 == 0, "H and W must be even."
+#     mid_H, mid_W = H // 2, W // 2
+#     TL = img[:, :mid_H, :mid_W]
+#     TR = img[:, :mid_H,  mid_W:]
+#     BL = img[:,  mid_H:, :mid_W]
+#     BR = img[:,  mid_H:,  mid_W:]
+#     return TL, TR, BL, BR
+
+# ORIENT_MAP = {
+#     0: ("TL", "TR"),  # side-to-side top
+#     1: ("BL", "BR"),  # side-to-side bottom
+#     2: ("TL", "BL"),  # left column
+#     3: ("TR", "BR"),  # right column
+#     4: ("TR", "BL"),  # diag 1
+#     5: ("TL", "BR"),  # diag 2
+# }
+# def sample_pair_by_orientation(img, orientation):
     
-    TL, TR, BL, BR = get_quadrants(img)
-    name2patch = {"TL": TL, "TR": TR, "BL": BL, "BR": BR}
-    a_name, b_name = ORIENT_MAP[orientation]
-    return name2patch[a_name], name2patch[b_name]
+#     TL, TR, BL, BR = get_quadrants(img)
+#     name2patch = {"TL": TL, "TR": TR, "BL": BL, "BR": BR}
+#     a_name, b_name = ORIENT_MAP[orientation]
+#     return name2patch[a_name], name2patch[b_name]
 
 
 class DataLoader(object):
@@ -328,22 +369,38 @@ class DataLoader(object):
                     return torch.stack(blurred, 0), labels
 
 
-                if mode == 'shuffle' :
-                    #    Returns:
-                    #    pair: Tensor of shape (2, C, H/2, W/2)  [patchA, patchB]
-                    #    label: LongTensor scalar in {0..5} 
-                    orientation = random.randint(0, 5)
-                    pA, pB = sample_pair_by_orientation(img0, orientation)
+                # if mode == 'shuffle' :
+                #     #    Returns:
+                #     #    pair: Tensor of shape (2, C, H/2, W/2)  [patchA, patchB]
+                #     #    label: LongTensor scalar in {0..5} 
+                #     orientation = random.randint(0, 5)
+                #     pA, pB = sample_pair_by_orientation(img0, orientation)
 
-                    if transform is not None:
-                        pA = transform(pA)
-                        pB = transform(pB)
+                #     if transform is not None:
+                #         pA = transform(pA)
+                #         pB = transform(pB)
 
-                    # 4) stack for model input
-                    pair = torch.stack([pA, pB], dim=0)  # (2, C, H/2, W/2)
-                    label = torch.tensor(orientation, dtype=torch.long)
+                #     # 4) stack for model input
+                #     pair = torch.stack([pA, pB], dim=0)  # (2, C, H/2, W/2)
+                #     label = torch.tensor(orientation, dtype=torch.long)
 
-                    return pair, label
+                #     return pair, label
+
+
+
+                if mode == 'jigsaw':
+                    perms = getattr(self.dataset, "jigsaw_perms", None)
+                    if perms is None : 
+                        raise RuntimeError("permutations attribute of Jigsaw did not get initialized in Genericdataset")
+                    
+                    jigsaw_image, label =  four_way_jigsaw(img0,perms)
+                    jigsaw_tensor = self.transform(jigsaw_image)
+                    jigsaw_tensor = jigsaw_tensor.unsqueeze(0)
+                    label_tensor = torch.LongTensor([label])
+
+                    return jigsaw_tensor, label_tensor
+
+
                 rotated_imgs = [
                     self.transform(img0),
                     self.transform(rotate_img(img0,  90)),
