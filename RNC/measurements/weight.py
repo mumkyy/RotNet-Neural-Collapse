@@ -45,16 +45,16 @@ def compute_weight_stats(name: str, module: nn.Module):
     soft_rank = (nuclear_Norm / spectral_Norm).item() 
 
 
-    # alternative stablerank(W) = (||W||Frubinius norm )^2 / (||W||2)^2 <= true rank 
-    fru_Norm = torch.linalg.matrix_norm(W2d, ord='fru')
-    stable_rank = ((fru_Norm**2) / (spectral_Norm**2)).item()
+    # alternative stablerank(W) = (||W||Frobinius norm )^2 / (||W||2)^2 <= true rank 
+    fro_Norm = torch.linalg.matrix_norm(W2d, ord='fro')
+    stable_rank = ((fro_Norm**2) / (spectral_Norm**2)).item()
 
     stats = {
         "name":                    name, 
         "shape":                   tuple(W.shape),
         "flat_shape":              tuple(W2d.shape),
         "rank_default":            rank, 
-        "stable_rank_fru":         stable_rank, 
+        "stable_rank_fro":         stable_rank, 
         "soft_rank_nuc":           soft_rank, 
     }
     return stats
@@ -174,7 +174,7 @@ if __name__ == '__main__':
             fp.write(f"{s['name']}\n")
             fp.write(f"  shape:        {s['shape']}\n")
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
-            fp.write(f"  stable_rank_fru:  {s['stable_rank_fru']}\n")
+            fp.write(f"  stable_rank_fro:  {s['stable_rank_fro']}\n")
             fp.write(f"  soft_rank_nuc:         {s['soft_rank_nuc']}\n")
             fp.write(f"  rank:         {s['rank']}\n")
         fp.write("\n=== All conv + linear blocks ===\n")
@@ -182,7 +182,7 @@ if __name__ == '__main__':
             fp.write(f"{s['name']}\n")
             fp.write(f"  shape:        {s['shape']}\n")
             fp.write(f"  flat_shape:   {s['flat_shape']}\n")
-            fp.write(f"  stable_rank_fru:  {s['stable_rank_fru']}\n")
+            fp.write(f"  stable_rank_fro:  {s['stable_rank_fro']}\n")
             fp.write(f"  soft_rank_nuc:         {s['soft_rank_nuc']}\n")
             fp.write(f"  rank:         {s['rank']}\n")
 
