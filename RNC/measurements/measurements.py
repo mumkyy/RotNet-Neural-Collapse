@@ -177,6 +177,10 @@ def build_fresh_model(
             "Either pass --arch-class, or add 'arch' to "
             f"config['networks']['{net_key}']."
         )
+
+
+    ModelCls = getattr(mod_model, cls_name)
+
     import inspect
     sig = inspect.signature(ModelCls.__init__)
     if 'num_classes' in opt_dict and 'num_classes' not in sig.parameters: 
@@ -186,7 +190,7 @@ def build_fresh_model(
         )
         opt_dict.pop('num_classes')
 
-    ModelCls = getattr(mod_model, cls_name)
+
     model = ModelCls(**opt_dict)
 
     if use_cuda:
