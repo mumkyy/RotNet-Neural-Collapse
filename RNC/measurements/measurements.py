@@ -154,9 +154,11 @@ def build_fresh_model(
     net_cfg = net_cfg_all[net_key]
 
     def_file = net_cfg['def_file']          # path to architecture file
-    opt_dict = net_cfg.get('opt', {})       # kwargs for model constructor
-
+    opt_dict = net_cfg.get('opt', {}).copy()       # kwargs for model constructor
+#.remove('num_classes') - getting an error wondering if I should use this 
+    
     module_path = Path(def_file)
+
     if not module_path.is_file():
         raise FileNotFoundError(f"architecture file {module_path} not found")
 
@@ -175,6 +177,14 @@ def build_fresh_model(
             "Either pass --arch-class, or add 'arch' to "
             f"config['networks']['{net_key}']."
         )
+    import inspect
+    sig = inspect.signature(ModelCls.__init__)
+    if 'num_classes' in opt_dict and 'num_classes' not in sig.parameters: 
+        print(
+            f"[Measurement] Removing 'num_classes' from opt_dict for "
+            f"{ModelCls.__name__} (not in ctor signature)."
+        )
+        opt_dict.pop('num_classes')
 
     ModelCls = getattr(mod_model, cls_name)
     model = ModelCls(**opt_dict)
