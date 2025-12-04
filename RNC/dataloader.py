@@ -96,7 +96,7 @@ class GenericDataset(data.Dataset):
         from maxHamming import generate_maximal_hamming_distance_set
         #per discussion today
         #performance at 7 was quite bad with MSE - will try 4
-        self.N_jigsaw = 4
+        self.N_jigsaw = 7
         P_1based = generate_maximal_hamming_distance_set(self.N_jigsaw, K=4)
         self.jigsaw_perms = [tuple(x-1 for x in p) for p in P_1based]
 
