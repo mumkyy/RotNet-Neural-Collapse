@@ -796,10 +796,21 @@ if __name__ == '__main__':
 
         # Load state dict
         state = torch.load(ckpt_path, map_location='cpu')
-        if isinstance(state, dict) and 'state_dict' in state:
-            model.load_state_dict(state['state_dict'])
+        state = torch.load(ckpt_path, map_location='cpu')
+
+        if isinstance(state, dict):
+            if 'state_dict' in state:
+                sd = state['state_dict']
+            elif 'network' in state:
+                sd = state['network']
+            elif 'model' in state:
+                sd = state['model']
+            else:
+                sd = state
         else:
-            model.load_state_dict(state)
+            sd = state
+
+        model.load_state_dict(sd)
 
         if use_cuda:
             model = model.cuda()
