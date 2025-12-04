@@ -191,7 +191,7 @@ def build_fresh_model(
 
     if not has_var_kw:
         allowed = {name for name in params.keys() if name != 'self'}
-        for key in list(opt.dict.keys()): 
+        for key in list(opt_dict.keys()): 
             if key not in allowed : 
                 print(f"removing {key}\n")
 
