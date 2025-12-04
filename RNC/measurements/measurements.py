@@ -183,12 +183,19 @@ def build_fresh_model(
 
     import inspect
     sig = inspect.signature(ModelCls.__init__)
-    if 'num_classes' in opt_dict and 'num_classes' not in sig.parameters: 
-        print(
-            f"[Measurement] Removing 'num_classes' from opt_dict for "
-            f"{ModelCls.__name__} (not in ctor signature)."
-        )
-        opt_dict.pop('num_classes')
+    params = sig.parameters
+    has_var_kw = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD
+        for p in params.values()
+    )
+
+    if not has_var_kw:
+        allowed = {name for name in params.keys() if name != 'self'}
+        for key in list(opt.dict.keys()): 
+            if key not in allowed : 
+                print(f"removing {key}\n")
+
+                opt_dict.pop(key)
 
 
     model = ModelCls(**opt_dict)
