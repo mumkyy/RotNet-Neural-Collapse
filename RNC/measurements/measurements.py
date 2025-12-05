@@ -192,15 +192,7 @@ def build_fresh_model(
 
     else: 
         model = ModelCls(**opt_dict)
-    if use_cuda:
-        try: 
-            model = model.cuda()
-        except RuntimeError as e: 
-            print(f"tried to use cuda but no GPU was allocated")
-            
     return model
-
-
 
 @torch.no_grad() 
 def compute_metrics( 
@@ -779,11 +771,14 @@ if __name__ == '__main__':
             sd = state
 
         model.load_state_dict(sd)
-
         if use_cuda:
-            model = model.cuda()
-        else: 
-            state=torch.load(ckpt_path, map_location='cpu')
+            try:
+                model = model.cuda()
+            except RuntimeError:
+                print("[Measurement] CUDA requested but GPU unavailable; continuing on CPU.")
+                use_cuda = False  # so later code will see "actually CPU"
+
+
         # Infer number of classes C for NC metrics
         C = infer_num_classes(model, config, args.net_key)
 
