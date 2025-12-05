@@ -734,9 +734,16 @@ if __name__ == '__main__':
             )
     else:
         epoch_list = all_epochs
+        print(f"[Measurement] Found epochs: {all_epochs}")
+        print(f"[Measurement] Analysing epochs (before subsampling): {epoch_list}")
 
-    print(f"[Measurement] Found epochs: {all_epochs}")
-    print(f"[Measurement] Analysing epochs: {epoch_list}")
+        # Keep only every 10th epoch, but also ensure we keep the last epoch
+        stride = 10
+
+        epoch_list = [e for e in epoch_list if e % stride == 0 or e == max(epoch_list)]
+
+        print(f"[Measurement] Analysing epochs (after subsampling): {epoch_list}")
+
 
     metrics = Measurements()
     batch_size = dt.get('batch_size', 0)
@@ -821,4 +828,4 @@ if __name__ == '__main__':
         plt.savefig(save_dir / 'plots' / f"{name}.pdf")
         plt.close()
 
-    print("✓ Done – results in", save_dir)
+    print("✓ Done – results in", save_dir)  
