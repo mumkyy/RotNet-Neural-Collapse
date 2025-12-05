@@ -197,7 +197,7 @@ def build_fresh_model(
             model = model.cuda()
         except RuntimeError as e: 
             print(f"tried to use cuda but no GPU was allocated")
-            use_cuda = False
+            
     return model
 
 
@@ -526,11 +526,7 @@ if __name__ == '__main__':
 
     use_cuda = (not args.no_cuda) and torch.cuda.is_available() 
 
-    if not use_cuda: 
-        _orig_load = torch.load 
-        torch.load = lambda f, **kw: _orig_load(
-            f, map_location=torch.device('cpu'), **kw
-        )
+
     set_seed(42)
     try:
         from torchvision import datasets, transforms
@@ -786,7 +782,8 @@ if __name__ == '__main__':
 
         if use_cuda:
             model = model.cuda()
-
+        else: 
+            state=torch.load(ckpt_path, map_location='cpu')
         # Infer number of classes C for NC metrics
         C = infer_num_classes(model, config, args.net_key)
 
