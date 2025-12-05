@@ -193,8 +193,11 @@ def build_fresh_model(
     else: 
         model = ModelCls(**opt_dict)
     if use_cuda:
-        model = model.cuda()
-
+        try: 
+            model = model.cuda()
+        except RuntimeError as e: 
+            print(f"tried to use cuda but no GPU was allocated")
+            use_cuda = False
     return model
 
 
