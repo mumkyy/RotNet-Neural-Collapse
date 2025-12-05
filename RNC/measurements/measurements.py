@@ -178,50 +178,20 @@ def build_fresh_model(
             f"config['networks']['{net_key}']."
         )
     ModelCls = getattr(mod_model, cls_name)
-
-    import inspect
+    import inspect 
+    #get the function signature to initialize the model
     sig = inspect.signature(ModelCls.__init__)
-    params = sig.parameters
 
-    # Check if ctor has **kwargs
-    has_var_kw = any(
-        p.kind == inspect.Parameter.VAR_KEYWORD
-        for p in params.values()
-    )
+    params_init = [name for name in sig.parameters if name!='self']
 
-    # All non-self "normal" parameters
-    named_params = [
-        name for name, p in params.items()
-        if name != 'self'
-        and p.kind in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        )
-    ]
+    if 'opt' in params_init:
+        model = ModelCls(opt_dict)
 
-    if not has_var_kw and len(named_params) == 1:
-        # Legacy style: __init__(self, opt) or __init__(self, cfg)
-        only = named_params[0]
-        print(
-            f"[Measurement] Passing entire opt_dict as '{only}' to "
-            f"{ModelCls.__name__}."
-        )
-        model = ModelCls(**{only: opt_dict})
-    else:
-        # Modern style: explicit kwargs, maybe with **kwargs too.
-        if not has_var_kw:
-            allowed = set(named_params)
-            for key in list(opt_dict.keys()):
-                if key not in allowed:
-                    print(
-                        f"[Measurement] Removing '{key}' from opt_dict for "
-                        f"{ModelCls.__name__} (not in ctor signature)."
-                    )
-                    opt_dict.pop(key)
+    elif 'cfg' in params_init: 
+        model = ModelCls(cfg=opt_dict)
+
+    else: 
         model = ModelCls(**opt_dict)
-
-
     if use_cuda:
         model = model.cuda()
 
@@ -795,7 +765,6 @@ if __name__ == '__main__':
         )
 
         # Load state dict
-        state = torch.load(ckpt_path, map_location='cpu')
         state = torch.load(ckpt_path, map_location='cpu')
 
         if isinstance(state, dict):
