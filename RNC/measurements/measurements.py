@@ -590,7 +590,8 @@ if __name__ == '__main__':
         raise FileNotFoundError(f"Experiment directory not found: {exp_dir}")
         
         
-    from dataloader import GenericDataset, DataLoader as RotLoader
+    from dataloader import GenericDataset
+    from torch.utils.data import DataLoader
 
     if args.split == 'train':
         dt = config['data_train_opt']
@@ -667,21 +668,31 @@ if __name__ == '__main__':
         loader = train_loader if args.split == 'train' else val_loader
 
     else:
-        # Original RNC path (CIFAR RotNet etc.)
         dataset_kwargs = {
             k: v for k, v in dt.items()
             if k not in ('batch_size', 'unsupervised', 'epoch_size')
         }
 
+
         ds = GenericDataset(**dataset_kwargs)
 
-        loader = RotLoader(
-            dataset=ds,
-            unsupervised=dt.get('unsupervised', False),
-            epoch_size=dt.get('epoch_size', None),
+        batch_size = dt.get('batch_size', 128)
+        epoch_size = dt.get('epoch_size', None)
+
+        if epoch_size is not None and epoch_size < len(ds):
+            indices = list(range(epoch_size))
+            ds_eval = torch.utils.data.Subset(ds, indices)
+        else:
+            ds_eval = ds
+
+        loader = DataLoader(
+            ds_eval,
+            batch_size=batch_size,
+            shuffle=False,
             num_workers=args.workers,
-            shuffle=False
-        )(0)
+            pin_memory=use_cuda,
+        )
+
 
 
     # Build evaluation loss
@@ -734,15 +745,15 @@ if __name__ == '__main__':
             )
     else:
         epoch_list = all_epochs
-        print(f"[Measurement] Found epochs: {all_epochs}")
-        print(f"[Measurement] Analysing epochs (before subsampling): {epoch_list}")
+        # print(f"[Measurement] Found epochs: {all_epochs}")
+        # print(f"[Measurement] Analysing epochs (before subsampling): {epoch_list}")
 
-        # Keep only every 10th epoch, but also ensure we keep the last epoch
-        stride = 10
+        # # Keep only every 10th epoch, but also ensure we keep the last epoch
+        # stride = 10
 
-        epoch_list = [e for e in epoch_list if e % stride == 0 or e == max(epoch_list)]
+        # epoch_list = [e for e in epoch_list if e % stride == 0 or e == max(epoch_list)]
 
-        print(f"[Measurement] Analysing epochs (after subsampling): {epoch_list}")
+        # print(f"[Measurement] Analysing epochs (after subsampling): {epoch_list}")
 
 
     metrics = Measurements()
