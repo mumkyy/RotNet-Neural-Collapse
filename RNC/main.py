@@ -49,15 +49,30 @@ def main():
         random_sized_crop=data_test_opt['random_sized_crop'])
     
     # Set pretext parameters only for unsupervised (backbone training)
+
     if data_train_opt['unsupervised']:
         dataset_train.pretext_mode = data_train_opt.get('pretext_mode', 'rotation')
         dataset_train.sigmas = data_train_opt.get('sigmas')
         dataset_train.kernel_sizes = data_train_opt.get('kernel_sizes')
-        
+
         dataset_test.pretext_mode = data_test_opt.get('pretext_mode', 'rotation')
         dataset_test.sigmas = data_test_opt.get('sigmas')
         dataset_test.kernel_sizes = data_test_opt.get('kernel_sizes')
-        
+
+        # ---- NEW: jigsaw augmentation knobs ----
+        dataset_train.patch_jitter = data_train_opt.get("patch_jitter", 0)
+        dataset_train.color_distort = data_train_opt.get("color_distort", False)
+        dataset_train.color_dist_strength = data_train_opt.get("color_dist_strength", 1.0)
+
+        dataset_test.patch_jitter = data_test_opt.get("patch_jitter", 0)
+        dataset_test.color_distort = data_test_opt.get("color_distort", False)
+        dataset_test.color_dist_strength = data_test_opt.get("color_dist_strength", 1.0)
+    
+    # Auto-set classification head size for jigsaw
+    if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw':
+        config['networks']['model']['opt']['num_classes'] = len(dataset_train.jigsaw_perms)
+        print("Jigsaw classes =", config['networks']['model']['opt']['num_classes'])
+
     dloader_train = DataLoader(
         dataset=dataset_train,
         batch_size=data_train_opt['batch_size'],

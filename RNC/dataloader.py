@@ -76,7 +76,9 @@ class Places205(data.Dataset):
 
 class GenericDataset(data.Dataset):
     def __init__(self, dataset_name, split, random_sized_crop=False,
-                 num_imgs_per_cat=None, pretext_mode='rotation', sigmas=None, kernel_sizes=None):
+                 num_imgs_per_cat=None, pretext_mode='rotation', sigmas=None, 
+                 kernel_sizes=None, patch_jitter=0,color_distort=False,
+                 color_dist_strength=1.0):
         self.split = split.lower()
         self.dataset_name =  dataset_name.lower()
         self.name = self.dataset_name + '_' + self.split
@@ -84,6 +86,9 @@ class GenericDataset(data.Dataset):
         self.pretext_mode = pretext_mode
         self.sigmas = sigmas
         self.kernel_sizes = kernel_sizes
+        self.patch_jitter = patch_jitter
+        self.color_distort = color_distort
+        self.color_dist_strength = color_dist_strength
 
         # The num_imgs_per_cats input argument specifies the number
         # of training examples per category that would be used.
@@ -251,38 +256,74 @@ def apply_gaussian_blur(img, sigma=1.0, kernel_size=5):
     blurred = blurred_img = F.gaussian_blur(img_pil, kernel_size=kernel_size, sigma=sigma)
     return np.array(blurred_img).copy()
 
+
+def color_distortion_PIL(img_pil : Image.Image, 
+                         strength: float = 1.0, 
+                         p_jitter: float = 0.8, 
+                         p_gray : float = 0.2) -> Image.Image: 
+    
+    cj = transforms.ColorJitter(
+        brightness=0.8*strength, 
+        contrast=0.8*strength, 
+        saturation=0.8*strength, 
+        hue=0.2*strength
+    )
+    if random.random() < p_jitter: 
+        img_pil = cj(img_pil)
+
+    if random.random() < p_gray: 
+        img_pil = transforms.functional.to_grayscale(img_pil, num_output_channels=3)
+    return img_pil
 #TODO test the implementation of the jigsaw
+
 from typing import List, Tuple
-def four_way_jigsaw(img , aug: List[Tuple]) -> Tuple[np.ndarray, int] : 
+def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter : int) -> Tuple[np.ndarray, int] : 
     img_H, img_W, img_C  = img.shape
     #we want to sub divide into quadrants : cifar 10 32x32 so each quadrant will be 16x16 = HxW
     assert img_H % 2 == 0 and img_W % 2 == 0
     q_H, q_W = img_H // 2 , img_W // 2
 
-    #first turn it into 4 patches then append them to a returnable image
-    img_t = torch.from_numpy(img).permute(2,0,1)
+    #apply jitter and color distort to jigsaw 12/22/25
+    #jitter in effect will be the displacement of quadrants (i.e. instead of the full context of the image take some subset and make 'shifted' quadrants)
 
-    label = random.randrange(len(aug))
-    perm = aug[label]
+    j = int(max(0, patch_jitter))
+    j = min(j, q_H - 1, q_W - 1) 
+    if j > 0: 
+        img_pad = np.pad(img, ((j,j), (j,j), (0,0)), mode ="reflect")
+    else : 
+        img_pad = img
 
-    quads = [
-        img_t[:, :q_H, :q_W], #0 
-        img_t[:, :q_H,  q_W:], #1
-        img_t[:,  q_H:, :q_W], #2
-        img_t[:,  q_H:, q_W:], #3
+    base_coords = [
+        (0,0), #TL
+        (0,q_W), #TR
+        (q_H,0), # BL 
+        (q_H, q_W), #BR
     ]
+#application of jitter to the image
+#take the max (i.e. non negative) jitter value between the desired jitter, quadrant H/W, image H / W that remains in the absence of each quadrant
+    patches = [] 
+    for (y0,x0) in base_coords: 
+        dy = random.randint(-j, j) if j > 0 else 0
+        dx = random.randint(-j, j) if j > 0 else 0
 
+        y = y0 + dy + j
+        x = x0 + dx + j
 
-    top  = torch.cat([quads[perm[0]], quads[perm[1]]], dim=2)
-    bot  = torch.cat([quads[perm[2]], quads[perm[3]]], dim=2)
+        patch = img_pad[y:y+q_H, x:x+q_W, :]
 
-    jig = torch.cat([top, bot], dim = 1)
+        assert patch.shape[0] == q_H and patch.shape[1] == q_W, patch.shape
 
-    jig_np = jig.permute(1,2,0).numpy().copy()
+        patches.append(patch)
 
-    return jig_np, label
+    label = random.randrange(len(perms))
+    perm = perms[label]
 
+    top = np.concatenate([patches[perm[0]], patches[perm[1]]], axis = 1)
+    
+    bot = np.concatenate([patches[perm[2]], patches[perm[3]]], axis = 1)
 
+    jig = np.concatenate([top, bot], axis = 0)
+    return jig.copy() , label
 
 #IGNORE THIS IMPLEMENTED IN CONTEXT-PRED
 
@@ -394,9 +435,19 @@ class DataLoader(object):
                     if perms is None : 
                         raise RuntimeError("permutations attribute of Jigsaw did not get initialized in Genericdataset")
                     
-                    jigsaw_image, label =  four_way_jigsaw(img0,perms)
-                    jigsaw_tensor = self.transform(jigsaw_image)
-                    jigsaw_tensor = jigsaw_tensor.unsqueeze(0)
+                    patch_jitter = int(getattr(self.dataset, "patch_jitter", 0))
+                    cd_strength = float(getattr(self.dataset, "color_dist_strength", 1.0))
+                    cd_enable = bool (getattr(self.dataset, "color_distort", False))
+
+                    if cd_enable: 
+                        img_pil = Image.fromarray(img0)
+                        img_pil = color_distortion_PIL(img_pil, strength=cd_strength)
+                        img0 = np.asarray(img_pil).copy()
+
+                    
+                    jigsaw_image, label =  four_way_jigsaw(img0,perms, patch_jitter = patch_jitter)
+
+                    jigsaw_tensor = self.transform(jigsaw_image).unsqueeze(0)
                     label_tensor = torch.LongTensor([label])
 
                     return jigsaw_tensor, label_tensor
