@@ -70,8 +70,13 @@ class NetworkInNetwork(nn.Module):
         blocks[-1].add_module('Classifier', nn.Linear(nChannels, num_classes))
 
         self._feature_blocks = nn.ModuleList(blocks)
-        self.all_feat_names = [f'conv{s+1}' for s in range(num_stages)] + ['classifier']
-        assert(len(self.all_feat_names) == len(self._feature_blocks))
+
+        self.all_feat_names = []
+        for s in range(num_stages):
+            for child_name, _ in blocks[s].named_children():
+                self.all_feat_names.append(f'conv{s+1}.{child_name}')
+            self.all_feat_names.append(f'conv{s+1}')
+        self.all_feat_names.append('classifier')
 
     def _parse_out_keys_arg(self, out_feat_keys):
         out_feat_keys = [self.all_feat_names[-1]] if out_feat_keys is None else out_feat_keys
@@ -84,23 +89,35 @@ class NetworkInNetwork(nn.Module):
             elif key in out_feat_keys[:f]:
                 raise ValueError(f'Duplicate output feature key: {key}.')
 
-        max_out_feat = max([self.all_feat_names.index(key) for key in out_feat_keys])
-
-        return out_feat_keys, max_out_feat
-
+        return out_feat_keys
+    
     def forward(self, x, out_feat_keys=None):
-        out_feat_keys, max_out_feat = self._parse_out_keys_arg(out_feat_keys)
+        out_feat_keys = self._parse_out_keys_arg(out_feat_keys)
+        out_index = {key: i for i, key in enumerate(out_feat_keys)}
         out_feats = [None] * len(out_feat_keys)
 
         feat = x
-        for f in range(max_out_feat + 1):
-            feat = self._feature_blocks[f](feat)
-            key = self.all_feat_names[f]
-            if key in out_feat_keys:
-                out_feats[out_feat_keys.index(key)] = feat
+        num_stages = len(self._feature_blocks) - 1
 
-        out_feats = out_feats[0] if len(out_feats) == 1 else out_feats
-        return out_feats
+        for s in range(num_stages):
+            for child_name, child in self._feature_blocks[s].named_children():
+                feat = child(feat)
+                key = f'conv{s+1}.{child_name}'
+                idx = out_index.get(key)
+                if idx is not None:
+                    out_feats[idx] = feat
+            key = f'conv{s+1}'
+            idx = out_index.get(key)
+            if idx is not None:
+                out_feats[idx] = feat
+                
+        feat = self._feature_blocks[-1](feat)
+        key = 'classifier'
+        idx = out_index.get(key)
+        if idx is not None:
+            out_feats[idx] = feat
+
+        return out_feats[0] if len(out_feats) == 1 else out_feats
 
     def weight_initialization(self):
         for m in self.modules():
