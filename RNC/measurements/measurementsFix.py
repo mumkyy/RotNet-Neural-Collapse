@@ -131,6 +131,7 @@ def build_cifar10_pretext_loader(
     color_distort: bool,
     color_dist_strength: float,
     shuffle: bool,
+    fixed_perms: Optional[List[Tuple[int, ...]]] = None,
 ):
     """
     Uses your existing dataloader.py pipeline.
@@ -149,6 +150,7 @@ def build_cifar10_pretext_loader(
         patch_jitter=patch_jitter,
         color_distort=color_distort,
         color_dist_strength=color_dist_strength,
+        fixed_perms=fixed_perms,
     )
 
     loader = RotLoader(
@@ -452,7 +454,9 @@ def main():
         sigmas = [1e-3, 1e-2, 1e-1, 1.0]
     if args.pretext_mode == "gaussian_blur" and kernel_sizes is None:
         kernel_sizes = [3, 5, 7, 9]
-
+    from maxHamming import generate_maximal_hamming_distance_set
+    global_perms_1based = generate_maximal_hamming_distance_set(4, K=4)
+    global_perms = [tuple(x-1 for x in p) for p in global_perms_1based]
     # loader
     loader = build_cifar10_pretext_loader(
         split=args.split,
@@ -465,6 +469,7 @@ def main():
         color_distort=args.color_distort,
         color_dist_strength=args.color_dist_strength,
         shuffle=False,
+        fixed_perms=global_perms
     )
 
     # model

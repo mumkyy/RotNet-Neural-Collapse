@@ -78,7 +78,7 @@ class GenericDataset(data.Dataset):
     def __init__(self, dataset_name, split, random_sized_crop=False,
                  num_imgs_per_cat=None, pretext_mode='rotation', sigmas=None, 
                  kernel_sizes=None, patch_jitter=0,color_distort=False,
-                 color_dist_strength=1.0):
+                 color_dist_strength=1.0, fixed_perms=None):
         self.split = split.lower()
         self.dataset_name =  dataset_name.lower()
         self.name = self.dataset_name + '_' + self.split
@@ -101,10 +101,14 @@ class GenericDataset(data.Dataset):
         from maxHamming import generate_maximal_hamming_distance_set
         #per discussion today
         #performance at 7 was quite bad with MSE - will try 4
-        self.N_jigsaw = 4
-        P_1based = generate_maximal_hamming_distance_set(self.N_jigsaw, K=4)
-        self.jigsaw_perms = [tuple(x-1 for x in p) for p in P_1based]
-
+        if fixed_perms is not None:
+            self.N_jigsaw = len(fixed_perms)
+            self.jigsaw_perms = fixed_perms
+        else:
+            # Fallback (or for initial generation)
+            self.N_jigsaw = 4
+            P_1based = generate_maximal_hamming_distance_set(self.N_jigsaw, K=4)
+            self.jigsaw_perms = [tuple(x-1 for x in p) for p in P_1based]
 
         if self.dataset_name=='imagenet':
             assert(self.split=='train' or self.split=='val')
@@ -276,8 +280,8 @@ def color_distortion_PIL(img_pil : Image.Image,
     return img_pil
 #TODO test the implementation of the jigsaw
 
-from typing import List, Tuple
-def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter : int) -> Tuple[np.ndarray, int] : 
+from typing import List, Tuple, Optional
+def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter : int, label: Optional[int] = None) -> Tuple[np.ndarray, int] : 
     img_H, img_W, img_C  = img.shape
     #we want to sub divide into quadrants : cifar 10 32x32 so each quadrant will be 16x16 = HxW
     assert img_H % 2 == 0 and img_W % 2 == 0
@@ -315,7 +319,10 @@ def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter 
 
         patches.append(patch)
 
-    label = random.randrange(len(perms))
+    if label is None:
+        label = random.randrange(len(perms))
+    else:
+        label = int(label) % len(perms)
     perm = perms[label]
 
     top = np.concatenate([patches[perm[0]], patches[perm[1]]], axis = 1)
@@ -438,14 +445,19 @@ class DataLoader(object):
                     patch_jitter = int(getattr(self.dataset, "patch_jitter", 0))
                     cd_strength = float(getattr(self.dataset, "color_dist_strength", 1.0))
                     cd_enable = bool (getattr(self.dataset, "color_distort", False))
-
+                    if getattr(self.dataset, "split", "").lower() == "test":
+                        label = idx % len(perms)
+                    else:
+                        label = None  # lets four_way_jigsaw pick random
                     if cd_enable: 
                         img_pil = Image.fromarray(img0)
                         img_pil = color_distortion_PIL(img_pil, strength=cd_strength)
                         img0 = np.asarray(img_pil).copy()
 
                     
-                    jigsaw_image, label =  four_way_jigsaw(img0,perms, patch_jitter = patch_jitter)
+                    jigsaw_image, label = four_way_jigsaw(
+                        img0, perms, patch_jitter=patch_jitter, label=label
+                    )
 
                     jigsaw_tensor = self.transform(jigsaw_image).unsqueeze(0)
                     label_tensor = torch.LongTensor([label])

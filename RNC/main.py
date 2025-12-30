@@ -36,17 +36,24 @@ def main():
     data_train_opt = config['data_train_opt']
     data_test_opt = config['data_test_opt']
     num_imgs_per_cat = data_train_opt['num_imgs_per_cat'] if ('num_imgs_per_cat' in data_train_opt) else None
+    from maxHamming import generate_maximal_hamming_distance_set
+    global_perms_1based = generate_maximal_hamming_distance_set(4, K=4)
+    global_perms = [tuple(x-1 for x in p) for p in global_perms_1based]
 
     dataset_train = GenericDataset(
         dataset_name=data_train_opt['dataset_name'],
         split=data_train_opt['split'],
         random_sized_crop=data_train_opt['random_sized_crop'],
-        num_imgs_per_cat=num_imgs_per_cat)
+        num_imgs_per_cat=num_imgs_per_cat,
+        fixed_perms=global_perms)
+        
+        
     
     dataset_test = GenericDataset(
         dataset_name=data_test_opt['dataset_name'],
         split=data_test_opt['split'],
-        random_sized_crop=data_test_opt['random_sized_crop'])
+        random_sized_crop=data_test_opt['random_sized_crop'],
+        fixed_perms=global_perms)
     
     # Set pretext parameters only for unsupervised (backbone training)
 
@@ -70,11 +77,9 @@ def main():
     
     # Auto-set classification head size for jigsaw
     if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw':
-        shared_perms = dataset_train.jigsaw_perms
-        dataset_test.jigsaw_perms = shared_perms
         config['networks']['model']['opt']['num_classes'] = len(dataset_train.jigsaw_perms)
         print("Jigsaw classes =", config['networks']['model']['opt']['num_classes'])
-        print("Shared jigsaw perms =", shared_perms)
+
 
 
 
