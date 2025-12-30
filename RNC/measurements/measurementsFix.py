@@ -120,7 +120,7 @@ def discover_checkpoints(exp_dir: Path, ckpt_glob: str) -> Dict[int, Path]:
 
 # -------------------- CIFAR10 pretext loader --------------------
 
-def build_cifar10_pretext_loader(
+def build_cifar10_pretext_loader_gen(
     split: str,
     batch_size: int,
     workers: int,
@@ -134,8 +134,7 @@ def build_cifar10_pretext_loader(
     fixed_perms: Optional[List[Tuple[int, ...]]] = None,
 ):
     """
-    Uses your existing dataloader.py pipeline.
-    Returns iterator yielding (x, y) with y in [0..C-1].
+    Returns the DataLoader OBJECT (factory), not the iterator.
     """
     from dataloader import GenericDataset, DataLoader as RotLoader
 
@@ -160,8 +159,9 @@ def build_cifar10_pretext_loader(
         epoch_size=None,
         num_workers=workers,
         shuffle=shuffle,
-    )(0)
+    )
 
+    # FIX: Return the loader object itself, so we can call loader(0) repeatedly
     return loader
 
 
@@ -183,7 +183,7 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
 @torch.no_grad()
 def compute_epoch_metrics_multilayer(
     model: nn.Module,
-    loader,
+    loader_gen, # This is now the object we can call
     num_classes: int,
     layer_keys: List[str],
     device: torch.device,
@@ -200,8 +200,6 @@ def compute_epoch_metrics_multilayer(
     loss_fn = nn.CrossEntropyLoss()
 
     # --- capture penultimate (input to final Linear) for NC3 ---
-    # In your NIN, final block is: GlobalAveragePooling -> Classifier (Linear)
-    # Classifier lives under model._feature_blocks[-1].Classifier
     if not hasattr(model, "_feature_blocks"):
         raise RuntimeError("Expected model._feature_blocks (NetworkInNetwork).")
     cls_layer = model._feature_blocks[-1].Classifier
@@ -232,7 +230,10 @@ def compute_epoch_metrics_multilayer(
 
     out_keys = layer_keys + ["classifier"]  # logits at "classifier"
 
-    for x, y in tqdm(loader, desc="PASS1 (means/acc/loss)", unit="batch", leave=False):
+    # FIX: Create fresh iterator for Pass 1
+    iter_pass1 = loader_gen(0)
+
+    for x, y in tqdm(iter_pass1, desc="PASS1 (means/acc/loss)", unit="batch", leave=False):
         x = x.to(device)
         y = y.to(device)
 
@@ -305,7 +306,10 @@ def compute_epoch_metrics_multilayer(
     # ---- PASS 2: within-class scatter for NC1 (per layer) ----
     total_ss_by_layer: Dict[str, float] = {k: 0.0 for k in layer_keys}
 
-    for x, y in tqdm(loader, desc="PASS2 (Sw per layer)", unit="batch", leave=False):
+    # FIX: Create fresh iterator for Pass 2
+    iter_pass2 = loader_gen(0)
+
+    for x, y in tqdm(iter_pass2, desc="PASS2 (Sw per layer)", unit="batch", leave=False):
         x = x.to(device)
         y = y.to(device)
         outs = model(x, out_feat_keys=layer_keys)  # list aligned to layer_keys
@@ -454,11 +458,13 @@ def main():
         sigmas = [1e-3, 1e-2, 1e-1, 1.0]
     if args.pretext_mode == "gaussian_blur" and kernel_sizes is None:
         kernel_sizes = [3, 5, 7, 9]
+    
     from maxHamming import generate_maximal_hamming_distance_set
     global_perms_1based = generate_maximal_hamming_distance_set(4, K=4)
     global_perms = [tuple(x-1 for x in p) for p in global_perms_1based]
-    # loader
-    loader = build_cifar10_pretext_loader(
+
+    # loader GENERATOR (the factory)
+    loader_gen = build_cifar10_pretext_loader_gen(
         split=args.split,
         batch_size=args.batch_size,
         workers=args.workers,
@@ -508,7 +514,7 @@ def main():
 
         nc1_by_layer, acc, loss, nc3 = compute_epoch_metrics_multilayer(
             model=model,
-            loader=loader,
+            loader_gen=loader_gen,
             num_classes=args.num_classes,
             layer_keys=layer_keys,
             device=device,
