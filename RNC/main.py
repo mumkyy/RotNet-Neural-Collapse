@@ -70,8 +70,13 @@ def main():
     
     # Auto-set classification head size for jigsaw
     if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw':
+        shared_perms = dataset_train.jigsaw_perms
+        dataset_test.jigsaw_perms = shared_perms
         config['networks']['model']['opt']['num_classes'] = len(dataset_train.jigsaw_perms)
         print("Jigsaw classes =", config['networks']['model']['opt']['num_classes'])
+        print("Shared jigsaw perms =", shared_perms)
+
+
 
     dloader_train = DataLoader(
         dataset=dataset_train,
