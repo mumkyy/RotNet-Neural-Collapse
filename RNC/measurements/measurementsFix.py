@@ -183,7 +183,7 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
 @torch.no_grad()
 def compute_epoch_metrics_multilayer(
     model: nn.Module,
-    loader, # This is the DataLoader object
+    loader, # This is the DataLoader object (callable)
     num_classes: int,
     layer_keys: List[str],
     device: torch.device,
@@ -230,9 +230,8 @@ def compute_epoch_metrics_multilayer(
 
     out_keys = layer_keys + ["classifier"]  # logits at "classifier"
 
-    # FIX: Create fresh iterator for Pass 1
-    # Since shuffle=False in the loader, this yields deterministic order
-    iter_pass1 = iter(loader)
+    # FIX: Call loader(0) to get the iterator
+    iter_pass1 = loader(0)
 
     for x, y in tqdm(iter_pass1, desc="PASS1 (means/acc/loss)", unit="batch", leave=False):
         x = x.to(device)
@@ -307,8 +306,8 @@ def compute_epoch_metrics_multilayer(
     # ---- PASS 2: within-class scatter for NC1 (per layer) ----
     total_ss_by_layer: Dict[str, float] = {k: 0.0 for k in layer_keys}
 
-    # FIX: Create fresh iterator for Pass 2
-    iter_pass2 = iter(loader)
+    # FIX: Call loader(0) to get the iterator
+    iter_pass2 = loader(0)
 
     for x, y in tqdm(iter_pass2, desc="PASS2 (Sw per layer)", unit="batch", leave=False):
         x = x.to(device)
@@ -521,7 +520,7 @@ def main():
     for start_idx in range(len(all_base_perms)):
         candidate_perms = get_set_starting_at(start_idx)
         
-        # Build quick loader (returns DataLoader object)
+        # Build quick loader (returns DataLoader callable object)
         calib_loader = build_cifar10_pretext_loader(
             split='test', batch_size=128, workers=0, # fast, no MP overhead
             pretext_mode=args.pretext_mode,
@@ -531,8 +530,8 @@ def main():
             shuffle=False, fixed_perms=candidate_perms
         )
         
-        # Run 1 batch (FIXED: calling iter() on object, not calling object itself)
-        x, y = next(iter(calib_loader))
+        # Run 1 batch (FIXED: calling loader(0) to get iterator)
+        x, y = next(iter(calib_loader(0)))
         x, y = x.to(device), y.to(device)
         with torch.no_grad():
             logits = model(x)[-1] # Assume last output is logits
