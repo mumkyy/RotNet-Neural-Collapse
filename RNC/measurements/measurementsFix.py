@@ -534,7 +534,13 @@ def main():
         x, y = next(iter(calib_loader(0)))
         x, y = x.to(device), y.to(device)
         with torch.no_grad():
-            logits = model(x)[-1] # Assume last output is logits
+            out_raw = model(x)
+            # FIX: Check if output is list/tuple or direct tensor
+            if isinstance(out_raw, (list, tuple)):
+                logits = out_raw[-1]
+            else:
+                logits = out_raw
+            
             acc = (logits.argmax(1) == y).float().mean().item()
             
         if acc > best_acc:
