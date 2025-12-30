@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from itertools import permutations
 
 
 # -------------------- utils --------------------
@@ -120,7 +121,7 @@ def discover_checkpoints(exp_dir: Path, ckpt_glob: str) -> Dict[int, Path]:
 
 # -------------------- CIFAR10 pretext loader --------------------
 
-def build_cifar10_pretext_loader_gen(
+def build_cifar10_pretext_loader(
     split: str,
     batch_size: int,
     workers: int,
@@ -134,7 +135,7 @@ def build_cifar10_pretext_loader_gen(
     fixed_perms: Optional[List[Tuple[int, ...]]] = None,
 ):
     """
-    Returns the DataLoader OBJECT (factory), not the iterator.
+    Returns the DataLoader OBJECT.
     """
     from dataloader import GenericDataset, DataLoader as RotLoader
 
@@ -161,7 +162,6 @@ def build_cifar10_pretext_loader_gen(
         shuffle=shuffle,
     )
 
-    # FIX: Return the loader object itself, so we can call loader(0) repeatedly
     return loader
 
 
@@ -183,7 +183,7 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
 @torch.no_grad()
 def compute_epoch_metrics_multilayer(
     model: nn.Module,
-    loader_gen, # This is now the object we can call
+    loader, # This is the DataLoader object
     num_classes: int,
     layer_keys: List[str],
     device: torch.device,
@@ -231,7 +231,8 @@ def compute_epoch_metrics_multilayer(
     out_keys = layer_keys + ["classifier"]  # logits at "classifier"
 
     # FIX: Create fresh iterator for Pass 1
-    iter_pass1 = loader_gen(0)
+    # Since shuffle=False in the loader, this yields deterministic order
+    iter_pass1 = iter(loader)
 
     for x, y in tqdm(iter_pass1, desc="PASS1 (means/acc/loss)", unit="batch", leave=False):
         x = x.to(device)
@@ -307,7 +308,7 @@ def compute_epoch_metrics_multilayer(
     total_ss_by_layer: Dict[str, float] = {k: 0.0 for k in layer_keys}
 
     # FIX: Create fresh iterator for Pass 2
-    iter_pass2 = loader_gen(0)
+    iter_pass2 = iter(loader)
 
     for x, y in tqdm(iter_pass2, desc="PASS2 (Sw per layer)", unit="batch", leave=False):
         x = x.to(device)
@@ -428,43 +429,135 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     config = load_config(args.config_root, args.exp)
-
+    
+    # ---------------------------------------------------------
+    # 1. SETUP & MODEL LOADING (Moved UP)
+    # ---------------------------------------------------------
     exp_dir = Path(args.exp_dir)
     if not exp_dir.is_dir():
         raise FileNotFoundError(f"exp-dir not found: {exp_dir}")
 
+    # Model
+    model = build_fresh_model(
+        config=config,
+        net_key=args.net_key,
+        arch_class=args.arch_class,
+        use_cuda=use_cuda,
+    )
+    
+    # Load the checkpoint we want to measure (or the last one found)
     epoch_to_path = discover_checkpoints(exp_dir, args.ckpt_glob)
     all_epochs = sorted(epoch_to_path.keys())
-
-    # choose epochs
+    
+    # Determine epochs to process
     if args.checkpoint is not None:
         epochs = [args.checkpoint]
     elif args.start_epoch is not None or args.end_epoch is not None:
         s = args.start_epoch if args.start_epoch is not None else min(all_epochs)
         e = args.end_epoch if args.end_epoch is not None else max(all_epochs)
         epochs = [ep for ep in all_epochs if s <= ep <= e]
-        if not epochs:
-            raise RuntimeError(f"No epochs found in range {s}..{e}")
     else:
         mx = max(all_epochs)
         epochs = sorted({ep for ep in all_epochs if (ep % args.stride == 0) or (ep == mx)})
 
-    # parse pretext params
+    # Load the FIRST epoch in the list just for calibration
+    print(f"\n[Calibration] Loading epoch {epochs[0]} to find correct permutations...")
+    load_state_dict(model, epoch_to_path[epochs[0]])
+    model.to(device)
+    model.eval()
+
+    # ---------------------------------------------------------
+    # 2. AUTO-DISCOVER PERMUTATIONS
+    # ---------------------------------------------------------
+    
+    # Re-implementing the core of maxHamming deterministically
+    # There are 4! = 24 possible starting permutations.
+    # We will try all 24 sets.
+    
+    K = 4 # 2x2 grid
+    N = args.num_classes
+    all_base_perms = list(permutations(range(1, K+1))) # 1-based logic from your file
+    
     sigmas = parse_float_list(args.sigmas)
     kernel_sizes = parse_int_list(args.kernel_sizes)
+    if args.pretext_mode == "gaussian_noise" and sigmas is None: sigmas = [1e-3, 1e-2, 1e-1, 1.0]
+    if args.pretext_mode == "gaussian_blur" and kernel_sizes is None: kernel_sizes = [3, 5, 7, 9]
 
-    # default 4-class lists if not provided
-    if args.pretext_mode == "gaussian_noise" and sigmas is None:
-        sigmas = [1e-3, 1e-2, 1e-1, 1.0]
-    if args.pretext_mode == "gaussian_blur" and kernel_sizes is None:
-        kernel_sizes = [3, 5, 7, 9]
+    best_perms = None
+    best_acc = -1.0
     
-    from maxHamming import generate_maximal_hamming_distance_set
-    global_perms_1based = generate_maximal_hamming_distance_set(4, K=4)
-    global_perms = [tuple(x-1 for x in p) for p in global_perms_1based]
+    print(f"[Calibration] Testing 24 possible permutation sets...")
+    
+    # Function to generate set starting at index start_idx
+    def get_set_starting_at(start_idx):
+        # EXACT logic from your maxHamming.py, but j is forced
+        P_bar = all_base_perms.copy()
+        P = []
+        j = start_idx # Forced start
+        
+        i = 1
+        while i <= N:
+            P.append(P_bar[j])
+            P_prime = P_bar[:j] + P_bar[j+1:]
+            
+            if i < N:
+                # Calculate Dist Matrix D
+                # D[x,y] = hamming(P[x], P_prime[y])
+                n_p = len(P)
+                n_pp = len(P_prime)
+                D = np.zeros((n_p, n_pp), dtype=int)
+                for r in range(n_p):
+                    for c in range(n_pp):
+                        D[r,c] = np.sum(np.array(P[r]) != np.array(P_prime[c]))
+                
+                D_bar = np.min(D, axis=0)
+                j = np.argmax(D_bar)
+            
+            P_bar = P_prime
+            i += 1
+        return [tuple(x-1 for x in p) for p in P] # Convert to 0-based for loader
 
-    # loader GENERATOR (the factory)
-    loader_gen = build_cifar10_pretext_loader_gen(
+    # Search loop
+    for start_idx in range(len(all_base_perms)):
+        candidate_perms = get_set_starting_at(start_idx)
+        
+        # Build quick loader (returns DataLoader object)
+        calib_loader = build_cifar10_pretext_loader(
+            split='test', batch_size=128, workers=0, # fast, no MP overhead
+            pretext_mode=args.pretext_mode,
+            sigmas=sigmas, kernel_sizes=kernel_sizes,
+            patch_jitter=args.patch_jitter,
+            color_distort=False, color_dist_strength=0.0,
+            shuffle=False, fixed_perms=candidate_perms
+        )
+        
+        # Run 1 batch (FIXED: calling iter() on object, not calling object itself)
+        x, y = next(iter(calib_loader))
+        x, y = x.to(device), y.to(device)
+        with torch.no_grad():
+            logits = model(x)[-1] # Assume last output is logits
+            acc = (logits.argmax(1) == y).float().mean().item()
+            
+        if acc > best_acc:
+            best_acc = acc
+            best_perms = candidate_perms
+        
+        # Optimization: If we hit >90%, we found it.
+        if best_acc > 0.90:
+            print(f"[Calibration] Found match at index {start_idx}! Acc: {best_acc:.2%}")
+            break
+            
+    if best_acc < 0.5:
+        print(f"\n[WARNING] Best match was only {best_acc:.2%}. Something else might be wrong (e.g. Patch Jitter mismatch).")
+    else:
+        print(f"[Calibration] Locked in permutation set. Best Acc: {best_acc:.2%}")
+
+    # ---------------------------------------------------------
+    # 3. MAIN METRICS LOOP
+    # ---------------------------------------------------------
+    
+    # Create the REAL loader with the found perms
+    loader = build_cifar10_pretext_loader(
         split=args.split,
         batch_size=args.batch_size,
         workers=args.workers,
@@ -475,15 +568,7 @@ def main():
         color_distort=args.color_distort,
         color_dist_strength=args.color_dist_strength,
         shuffle=False,
-        fixed_perms=global_perms
-    )
-
-    # model
-    model = build_fresh_model(
-        config=config,
-        net_key=args.net_key,
-        arch_class=args.arch_class,
-        use_cuda=use_cuda,
+        fixed_perms=best_perms 
     )
 
     # validate layer keys exist
@@ -514,7 +599,7 @@ def main():
 
         nc1_by_layer, acc, loss, nc3 = compute_epoch_metrics_multilayer(
             model=model,
-            loader_gen=loader_gen,
+            loader=loader,
             num_classes=args.num_classes,
             layer_keys=layer_keys,
             device=device,
@@ -552,7 +637,6 @@ def main():
     plot_and_save(out_dir, epochs_logged, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, "SimpleNIN")
 
     print(f"\n✓ Done. Results in: {out_dir}")
-
 
 if __name__ == "__main__":
     main()
