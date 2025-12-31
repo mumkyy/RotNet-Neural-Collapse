@@ -36,18 +36,12 @@ for conv in "${convs[@]}"; do
   ((count+=1))
 done
 
-hooks+=("classifier")
-
 
 
 for i in "${!hooks[@]}"; do
   hook="${hooks[$i]}"
 
-  if [[ "$hook" == "classifier" ]]; then
-    subdir="classifier"
-  else
-    subdir="${hook%%.*}"
-  fi
+  subdir="${hook%%.*}"
 
   # collapsed config 
   COLL_OUT="config/CIFAR10/RotNet/MSE/Collapsed/convclassifier/${subdir}/"
