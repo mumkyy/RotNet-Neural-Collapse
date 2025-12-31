@@ -78,6 +78,11 @@ class NetworkInNetwork(nn.Module):
             self.all_feat_names.append(f'conv{s+1}')
         self.all_feat_names.append('classifier')
 
+        self._feature_name_map = {"classifier": self._feature_blocks[-1]}
+        for i, block in enumerate(self._feature_blocks[:-1]):
+            self._feature_name_map[f"conv{i+1}"] = block
+            self._feature_name_map.update({f"conv{i+1}.{n}": m for n, m in block.named_children()})
+
     def _parse_out_keys_arg(self, out_feat_keys):
         out_feat_keys = [self.all_feat_names[-1]] if out_feat_keys is None else out_feat_keys
 
@@ -134,6 +139,9 @@ class NetworkInNetwork(nn.Module):
                 if m.bias.requires_grad:
                     m.bias.data.zero_()
 
+    def get_feature_module(self, name):
+        return self._feature_name_map[name]
+    
 def create_model(opt):
     return NetworkInNetwork(opt)
 

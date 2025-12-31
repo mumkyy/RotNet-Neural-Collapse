@@ -39,13 +39,8 @@ class ClassificationModel(Algorithm):
         self.feats = {}
         if 'nc_reg' in opt:
             model = self.networks['model']
-            name_map = {"classifier": model._feature_blocks[-1]}
-            for i, block in enumerate(model._feature_blocks[:-1]):
-                name_map[f"conv{i+1}"] = block
-                for n, m in block.named_children():
-                    name_map[f"conv{i+1}.{n}"] = m
             for layer in opt['nc_reg']['layers']:
-                feat_module = name_map[layer]
+                feat_module = model.get_feature_module(layer)
                 feat_module.register_forward_hook(
                     lambda m, i, o, name=layer: self.feats.__setitem__(name, o.view(o.size(0), -1))
                 )
