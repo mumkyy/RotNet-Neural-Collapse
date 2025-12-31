@@ -68,11 +68,11 @@ for i in "${!hooks[@]}"; do
   job_safe="${hook//./_}"
 
   # collapsed
-  jid_up=$(sbatch --parsable --job-name="gpu_collapsed_${job_safe}" --export=ALL,EXP_NAME="$COLL_EXP" ./submit.sh)
-  echo "Submitted collapsed: $jid_up"
+  jid_coll=$(sbatch --parsable --job-name="gpu_collapsed_${job_safe}" --export=ALL,EXP_NAME="$COLL_EXP" ../scripts/submit.sh)
+  echo "Submitted collapsed: $jid_coll"
 
   # not collapsed
-  jid_down=$(sbatch --parsable --job-name="gpu_not_collapsed_${job_safe}" --export=ALL,EXP_NAME="$NOT_EXP" ./submit.sh)
-  echo "Submitted not collapsed: $jid_down"
+  jid_not=$(sbatch --parsable --job-name="gpu_not_collapsed_${job_safe}" --export=ALL,EXP_NAME="$NOT_EXP" ../scripts/submit.sh)
+  echo "Submitted not collapsed: $jid_not"
 
 done
