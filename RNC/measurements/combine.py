@@ -4,8 +4,7 @@ import argparse
 import pickle
 import sys
 import matplotlib.pyplot as plt
-from measurements.measurements import Measurements
-
+from measurements.measurementsFix import Measurements 
 
 def parse_args():
     p = argparse.ArgumentParser("Compare two RotNet measurement runs")
