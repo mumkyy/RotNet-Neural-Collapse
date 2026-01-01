@@ -64,15 +64,4 @@ for i in "${!hooks[@]}"; do
   sed -E -i "s|^config\\['out_feat_keys'\\][[:space:]]*=.*|config['out_feat_keys'] = ['${hook}']|" "$NOT_EXP"
 
   echo "Wrote $NOT_EXP"
-
-  job_safe="${hook//./_}"
-
-  # collapsed
-  jid_coll=$(sbatch --parsable --job-name="gpu_collapsed_${job_safe}" --export=ALL,EXP_NAME="$COLL_EXP" ../scripts/submit.sh)
-  echo "Submitted collapsed: $jid_coll"
-
-  # not collapsed
-  jid_not=$(sbatch --parsable --job-name="gpu_not_collapsed_${job_safe}" --export=ALL,EXP_NAME="$NOT_EXP" ../scripts/submit.sh)
-  echo "Submitted not collapsed: $jid_not"
-
 done
