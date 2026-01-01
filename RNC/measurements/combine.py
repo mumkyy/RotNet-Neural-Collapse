@@ -49,8 +49,8 @@ def main():
 
     epochsA = list(map(int, dataA['epochs']))
     epochsB = list(map(int, dataB['epochs']))
-    mA: Measurements = dataA['metrics']
-    mB: Measurements = dataB['metrics']
+    mA: Measurements = dataA['payload']
+    mB: Measurements = dataB['payload']
 
     # Align to common epochs
     common = sorted(set(epochsA).intersection(epochsB))
