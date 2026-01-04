@@ -49,6 +49,34 @@ class FeatureClassificationModel(Algorithm):
 
     def evaluation_step(self, batch):
         return self.process_batch(batch, do_train=False)
+    
+
+    def _check_finite(self, x, name: str):
+        # Handles Tensor or (list/tuple) of Tensors
+        if isinstance(x, (list, tuple)):
+            for i, t in enumerate(x):
+                self._check_finite(t, f"{name}[{i}]")
+            return
+
+        if not torch.is_tensor(x):
+            print(f"{name}: not a tensor, type={type(x)}")
+            return
+
+        if not torch.isfinite(x).all():
+            nan = torch.isnan(x).sum().item()
+            inf = torch.isinf(x).sum().item()
+            print(f"\nNON-FINITE DETECTED in {name}")
+            print(" shape:", tuple(x.shape), "dtype:", x.dtype, "device:", x.device)
+            print(" nan:", nan, "inf:", inf)
+            # nanmin/nanmax exist on newer torch; if not, just print min/max after masking
+            try:
+                print(" min/max:", x.nanmin().item(), x.nanmax().item())
+            except Exception:
+                finite = x[torch.isfinite(x)]
+                if finite.numel() > 0:
+                    print(" finite min/max:", finite.min().item(), finite.max().item())
+            raise RuntimeError(f"NaNs/Infs in {name}")
+
 
     # --------------------------------------------------------------
     # core logic
@@ -83,6 +111,7 @@ class FeatureClassificationModel(Algorithm):
                     feat = feat.detach()
 
         pred = self.networks['classifier'](feat)
+        self._check_finite(pred, "classifier output")
 
         # ---------- loss & metrics --------------------------------
         record = {}
@@ -113,6 +142,7 @@ class FeatureClassificationModel(Algorithm):
             record['prec5'] = accuracy(p, labels, (5,))[0]
 
         record['loss'] = loss_total.item()
+        self._check_finite(loss_total, "loss_total")
         # ---------- backward --------------------------------------
         if do_train:
             loss_total.backward()
