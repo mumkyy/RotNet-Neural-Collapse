@@ -32,6 +32,11 @@ class FeatureClassificationModel(Algorithm):
         self.out_feat_keys = opt['out_feat_keys']
         super().__init__(opt)
 
+        for name, layer in self.networks['classifier'].named_modules():
+            if len(list(layer.children())) == 0:  # leaf only
+                layer.register_forward_hook(debug_hook)
+
+
     # --------------------------------------------------------------
     # infrastructure
     # --------------------------------------------------------------
@@ -49,33 +54,6 @@ class FeatureClassificationModel(Algorithm):
 
     def evaluation_step(self, batch):
         return self.process_batch(batch, do_train=False)
-    
-
-    def _check_finite(self, x, name: str):
-        # Handles Tensor or (list/tuple) of Tensors
-        if isinstance(x, (list, tuple)):
-            for i, t in enumerate(x):
-                self._check_finite(t, f"{name}[{i}]")
-            return
-
-        if not torch.is_tensor(x):
-            print(f"{name}: not a tensor, type={type(x)}")
-            return
-
-        if not torch.isfinite(x).all():
-            nan = torch.isnan(x).sum().item()
-            inf = torch.isinf(x).sum().item()
-            print(f"\nNON-FINITE DETECTED in {name}")
-            print(" shape:", tuple(x.shape), "dtype:", x.dtype, "device:", x.device)
-            print(" nan:", nan, "inf:", inf)
-            # nanmin/nanmax exist on newer torch; if not, just print min/max after masking
-            try:
-                print(" min/max:", x.nanmin().item(), x.nanmax().item())
-            except Exception:
-                finite = x[torch.isfinite(x)]
-                if finite.numel() > 0:
-                    print(" finite min/max:", finite.min().item(), finite.max().item())
-            raise RuntimeError(f"NaNs/Infs in {name}")
 
 
     # --------------------------------------------------------------
@@ -111,7 +89,6 @@ class FeatureClassificationModel(Algorithm):
                     feat = feat.detach()
 
         pred = self.networks['classifier'](feat)
-        self._check_finite(pred, "classifier output")
 
         # ---------- loss & metrics --------------------------------
         record = {}
@@ -142,10 +119,25 @@ class FeatureClassificationModel(Algorithm):
             record['prec5'] = accuracy(p, labels, (5,))[0]
 
         record['loss'] = loss_total.item()
-        self._check_finite(loss_total, "loss_total")
+
+        if not torch.isfinite(loss_total).all():
+            feat_dbg = feat[-1] if isinstance(feat, (list, tuple)) else feat
+            p_dbg = p if 'p' in locals() else (pred[-1] if isinstance(pred, (list, tuple)) else pred)
+
+            print("\n" + "="*60)
+            print("NON-FINITE LOSS DETECTED")
+            print("="*60)
+            print(f"Feature stats - mean: {feat_dbg.mean().item():.6f}, std: {feat_dbg.std().item():.6f}, "
+                f"min: {feat_dbg.min().item():.6f}, max: {feat_dbg.max().item():.6f}")
+            print(f"Pred stats - min: {p_dbg.min().item():.3e}, max: {p_dbg.max().item():.3e}, mean: {p_dbg.mean().item():.3e}")
+            print(f"Pred has inf: {torch.isinf(p_dbg).sum().item()} values")
+            print(f"Loss value: {loss_total.item():.3e}")
+            raise RuntimeError("Non-finite loss - stopping before backward")
+
         # ---------- backward --------------------------------------
         if do_train:
             loss_total.backward()
+
             self.optimizers['classifier'].step()
             if finetune:
                 self.optimizers['feat_extractor'].step()
@@ -155,3 +147,25 @@ class FeatureClassificationModel(Algorithm):
         record['load_time'] = 100 * load_tm / total_tm
         record['process_time'] = 100 * proc_tm / total_tm
         return record
+
+
+def debug_hook(module, input, output):
+    """Hook to print layer statistics during forward pass."""
+    try:
+        inp = input[0] if isinstance(input, tuple) else input
+        
+        # Handle None outputs
+        if output is None:
+            print(f"{module.__class__.__name__}: output is None")
+            return
+            
+        # Check if finite
+        inp_finite = torch.isfinite(inp).all()
+        out_finite = torch.isfinite(output).all()
+        
+        print(f"{module.__class__.__name__:15s}: "
+              f"in [{inp.min():.3e}, {inp.max():.3e}] {'✓' if inp_finite else '✗'} → "
+              f"out [{output.min():.3e}, {output.max():.3e}] {'✓' if out_finite else '✗'}")
+              
+    except Exception as e:
+        print(f"{module.__class__.__name__}: Hook error: {e}")
