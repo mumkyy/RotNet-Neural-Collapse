@@ -596,8 +596,6 @@ def main():
     for k in layer_keys:
         if k not in model.all_feat_names:
             raise RuntimeError(f"Layer key '{k}' not in model.all_feat_names: {model.all_feat_names}")
-    if len(layer_keys) == 0:
-        raise RuntimeError("Layer list is empty; pass --layers explicitly.")
 
     # output dir
     out_dir = Path(args.out_root) / f"{Path(args.exp).name}_{args.pretext_mode}_{args.split}"
