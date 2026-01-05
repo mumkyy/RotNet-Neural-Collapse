@@ -24,7 +24,7 @@ config['max_num_epochs'] = 100
 
 networks = {}
 feat_net_opt = {'num_classes': 4, 'num_stages': 4, 'use_avg_on_conv3': False}
-feat_pretrained_file = './experiments/CIFAR10_RotNet_NIN4blocks/model_net_epoch200'
+feat_pretrained_file = './experiments/CIFAR10_RotNet_NIN4blocks_Collapsed_CE/model_net_epoch200'
 networks['feat_extractor'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretrained': feat_pretrained_file, 'opt': feat_net_opt,  'optim_params': None} 
 
 cls_net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(35, 0.1),(70, 0.02),(85, 0.004),(100, 0.0008)]}
