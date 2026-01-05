@@ -373,6 +373,19 @@ def plot_and_save(save_dir: Path, epochs: List[int], series: Dict[str, List[floa
         plt.savefig(save_dir / "plots" / f"{name}.pdf")
         plt.close()
 
+def plot_nc1_layers(save_dir: Path, epochs: List[int], nc1_curves: Dict[str, List[float]], title: str) -> None:
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+    plt.figure()
+    for k, vals in nc1_curves.items():
+        plt.plot(epochs, vals, marker="o", label=k)
+    plt.xlabel("epoch")
+    plt.ylabel("NC1")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / "nc1_layers.pdf")
+    plt.close()
+
 
 # -------------------- CLI --------------------
 
@@ -583,6 +596,8 @@ def main():
     for k in layer_keys:
         if k not in model.all_feat_names:
             raise RuntimeError(f"Layer key '{k}' not in model.all_feat_names: {model.all_feat_names}")
+    if len(layer_keys) == 0:
+        raise RuntimeError("Layer list is empty; pass --layers explicitly.")
 
     # output dir
     out_dir = Path(args.out_root) / f"{Path(args.exp).name}_{args.pretext_mode}_{args.split}"
@@ -640,6 +655,7 @@ def main():
     # plots
     plot_and_save(out_dir, epochs_logged, {"accuracy": acc_curve, "loss": loss_curve, "nc3": nc3_curve}, "SimpleNIN")
     plot_and_save(out_dir, epochs_logged, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, "SimpleNIN")
+    plot_nc1_layers(out_dir, epochs_logged, nc1_curves, "NC1 per layer")
 
     print(f"\n✓ Done. Results in: {out_dir}")
 

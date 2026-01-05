@@ -41,10 +41,10 @@ class ClassificationModel(Algorithm):
             model = self.networks['model']
             for layer in opt['nc_reg']['layers']:
                 feat_module = model.get_feature_module(layer)
+                #NO FLATTEN HERE    
                 feat_module.register_forward_hook(
-                    lambda m, i, o, name=layer: self.feats.__setitem__(name, o.view(o.size(0), -1))
+                    lambda m, i, o, name=layer: self.feats.__setitem__(name, o)
                 )
-
 
     def allocate_tensors(self):
         self.tensors = {}
@@ -93,38 +93,45 @@ class ClassificationModel(Algorithm):
         else:
             loss_total = crit(pred_var, labels_var)
 
-        # --- NC1 penalty (safe, simplest) ---
+        # --- NC1 penalty ---
+        #no warmup
         if do_train and ('nc_reg' in self.opt):
-            # optional warmup: enable after N epochs
-            warm = self.opt['nc_reg'].get('warmup_epochs', 0)
-            if self.curr_epoch >= warm:
-                for layer in self.opt['nc_reg']['layers']:
-                    z = self.feats.get(layer, None)
-                    if z is None:       # hook hasn’t fired for some reason
-                        continue
-                    z = z.float()        # AMP stability
+            eps = 1e-6
+            for layer in self.opt['nc_reg']['layers']:
+                z = self.feats.get(layer, None)
+                if z is None:       # hook hasn’t fired for some reason
+                    continue
 
-                    mu = z.mean(0)
-                    Sw = z.new_tensor(0.0)
-                    Sb = z.new_tensor(0.0)
-                    for c in range(C):
-                        mask = (labels_var == c)
-                        if mask.sum() < 2:
-                            continue
-                        zc = z[mask]
-                        mu_c = zc.mean(0)
-                        Sw = Sw + ((zc - mu_c)**2).sum()
-                        Sb = Sb + zc.size(0) * ((mu_c - mu)**2).sum()
+                if z.dim() == 4:
+                    z = z.mean(dim=(2, 3))
 
-                    nc1 = torch.clamp(Sw / (Sb.detach() + 1e-6), min=1e-3)
-                    penalty = -torch.log(nc1 + 1e-6)
-                    w = self.opt['nc_reg']['weights'][layer]
-                    loss_total = loss_total + w * penalty
+                B, D = z.shape
+
+                # Per-class counts + means
+                counts = torch.bincount(labels_var, minlength=C).float()
+                sums = z.new_zeros(C, D)
+                sums.index_add_(0, labels_var, z)
+                means = sums / counts.clamp_min(1.0).unsqueeze(1)  # (C, D)
+
+                # trace(Sw) = average within-class squared distance
+                mu_y = means.index_select(0, labels_var)           # (B, D)
+                trace_Sw = ((z - mu_y) ** 2).sum() / float(B)
+
+                # trace(Sb): sum_c n_c ||mu_c - mu||^2 where mu is global mean of samples
+                mu = z.mean(0)                                                          # (D,)
+                diff = means - mu.unsqueeze(0)                                          # (C,D)
+                trace_Sb = (counts.unsqueeze(1) * (diff ** 2)).sum() / float(B)         # scalar
+
+                nc1 = trace_Sw / (trace_Sb + eps)
+                penalty = -torch.log(nc1 + eps)
+
+                w = self.opt['nc_reg']['weights'][layer]
+                loss_total = loss_total + w * penalty
 
 
         record = {}
         # precision still computed on raw logits
-        record['prec1'] = accuracy(pred_var.data, labels_var, topk=(1,))[0].item()
+        record['prec1'] = accuracy(pred_var.detach(), labels_var, topk=(1,))[0].item()
         record['loss']  = loss_total.item()
         #********************************************************
 
