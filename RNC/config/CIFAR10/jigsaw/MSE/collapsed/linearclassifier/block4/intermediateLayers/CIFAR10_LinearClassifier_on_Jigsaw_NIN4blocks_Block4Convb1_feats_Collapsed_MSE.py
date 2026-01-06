@@ -28,7 +28,7 @@ feat_pretrained_file = './experiments/CIFAR10_Jigsaw_NIN4blocks_Collapsed_MSE_Fo
 networks['feat_extractor'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretrained': feat_pretrained_file, 'opt': feat_net_opt,  'optim_params': None} 
 
 cls_net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(35, 0.1),(70, 0.02),(85, 0.004),(100, 0.0008)]}
-cls_net_opt = {'num_classes':10, 'nChannels':192, 'cls_type':'NIN_ConvBlock3'}
+cls_net_opt = {'num_classes':10, 'nChannels':192, 'pool_size': 1, 'pool_type': 'avg', 'cls_type':'NIN_ConvBlock3'}
 networks['classifier'] = {'def_file': 'architectures/LinearClassifier.py', 'pretrained': None, 'opt': cls_net_opt, 'optim_params': cls_net_optim_params}
 config['out_feat_keys'] = ['conv4.Block4_ConvB1']
 
