@@ -32,6 +32,7 @@ class FeatureClassificationModel(Algorithm):
         self.out_feat_keys = opt['out_feat_keys']
         super().__init__(opt)
 
+
     # --------------------------------------------------------------
     # infrastructure
     # --------------------------------------------------------------
@@ -49,6 +50,7 @@ class FeatureClassificationModel(Algorithm):
 
     def evaluation_step(self, batch):
         return self.process_batch(batch, do_train=False)
+
 
     # --------------------------------------------------------------
     # core logic
@@ -113,9 +115,11 @@ class FeatureClassificationModel(Algorithm):
             record['prec5'] = accuracy(p, labels, (5,))[0]
 
         record['loss'] = loss_total.item()
+
         # ---------- backward --------------------------------------
         if do_train:
             loss_total.backward()
+
             self.optimizers['classifier'].step()
             if finetune:
                 self.optimizers['feat_extractor'].step()

@@ -54,6 +54,32 @@ def get_nc1_data(data_dict):
         print("[warning] Could not find NC1 data (nc1_by_layer or trSwtrSb)")
         return [0] * len(data_dict.get('epochs', []))
 
+def get_nc1_by_layer_at(data_dict, epoch_idx):
+    if 'nc1_by_layer' not in data_dict:
+        print("[warning] nc1_by_layer not found; skipping per-layer comparison.")
+        return {}
+    layers_dict = data_dict['nc1_by_layer']
+    out = {}
+    for k, series in layers_dict.items():
+        if epoch_idx < len(series):
+            out[k] = series[epoch_idx]
+    return out
+
+def plot_nc1_by_layer(out_dir, layers, vals_a, vals_b, label_a, label_b, epoch):
+    plt.figure(figsize=(10, 5))
+    x = list(range(len(layers)))
+    plt.plot(x, vals_a, 'bx-', label=label_a)
+    plt.plot(x, vals_b, 'ro-', label=label_b)
+    plt.xticks(x, layers, rotation=45, ha='right')
+    plt.xlabel('Layer')
+    plt.ylabel('NC1')
+    plt.title(f'NC1 across layers at epoch {epoch}')
+    plt.legend(frameon=False)
+    plt.grid(True, ls='--', alpha=0.6)
+    plt.tight_layout()
+    plt.savefig(out_dir / 'nc1_layers_final_compare.pdf')
+    plt.close()
+
 def main():
     args = parse_args()
 
@@ -187,6 +213,19 @@ def main():
     plt.tight_layout()
     plt.savefig(out_dir / 'nc1_nc3_comparison.pdf')
     plt.close()
+
+    # 6) NC1 per-layer at final common epoch
+    last_common_epoch = common[-1]
+    nc1_layers_A = get_nc1_by_layer_at(dataA, idxA[-1])
+    nc1_layers_B = get_nc1_by_layer_at(dataB, idxB[-1])
+    if nc1_layers_A and nc1_layers_B:
+        layers = [k for k in nc1_layers_A.keys() if k in nc1_layers_B]
+        if layers:
+            vals_a = [nc1_layers_A[k] for k in layers]
+            vals_b = [nc1_layers_B[k] for k in layers]
+            plot_nc1_by_layer(out_dir, layers, vals_a, vals_b, args.label_a, args.label_b, last_common_epoch)
+        else:
+            print("[warning] No overlapping layer keys for nc1_by_layer; skipping per-layer plot.")
 
     print("✓  Done – results in", out_dir)
 

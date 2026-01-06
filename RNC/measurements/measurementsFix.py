@@ -373,6 +373,32 @@ def plot_and_save(save_dir: Path, epochs: List[int], series: Dict[str, List[floa
         plt.savefig(save_dir / "plots" / f"{name}.pdf")
         plt.close()
 
+def plot_nc1_layers(save_dir: Path, epochs: List[int], nc1_curves: Dict[str, List[float]], title: str) -> None:
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+    plt.figure()
+    for k, vals in nc1_curves.items():
+        plt.plot(epochs, vals, marker="o", label=k)
+    plt.xlabel("epoch")
+    plt.ylabel("NC1")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / "nc1_layers.pdf")
+    plt.close()
+
+def plot_nc1_by_layer(save_dir: Path, layer_keys: List[str], nc1_vals: List[float], title: str) -> None:
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+    plt.figure()
+    x = list(range(len(layer_keys)))
+    plt.plot(x, nc1_vals, "bx-")
+    plt.xticks(x, layer_keys, rotation=45, ha="right")
+    plt.xlabel("Layer")
+    plt.ylabel("NC1")
+    plt.title(title)
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / "nc1_layers_final.pdf")
+    plt.close()
+
 
 # -------------------- CLI --------------------
 
@@ -640,6 +666,11 @@ def main():
     # plots
     plot_and_save(out_dir, epochs_logged, {"accuracy": acc_curve, "loss": loss_curve, "nc3": nc3_curve}, "SimpleNIN")
     plot_and_save(out_dir, epochs_logged, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, "SimpleNIN")
+    if epochs_logged:
+        last_epoch = epochs_logged[-1]
+        last_vals = [nc1_curves[k][-1] for k in layer_keys]
+        plot_nc1_by_layer(out_dir, layer_keys, last_vals, f"NC1 across layers at epoch {last_epoch}")
+    
 
     print(f"\n✓ Done. Results in: {out_dir}")
 

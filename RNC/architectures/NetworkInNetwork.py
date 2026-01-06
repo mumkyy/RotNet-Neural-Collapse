@@ -76,9 +76,10 @@ class NetworkInNetwork(nn.Module):
             for child_name, _ in blocks[s].named_children():
                 self.all_feat_names.append(f'conv{s+1}.{child_name}')
             self.all_feat_names.append(f'conv{s+1}')
+        self.all_feat_names.append('penult')
         self.all_feat_names.append('classifier')
 
-        self._feature_name_map = {"classifier": self._feature_blocks[-1]}
+        self._feature_name_map = {"classifier": self._feature_blocks[-1].Classifier, "penult" : self._feature_blocks[-1].GlobalAveragePooling}
         for i, block in enumerate(self._feature_blocks[:-1]):
             self._feature_name_map[f"conv{i+1}"] = block
             self._feature_name_map.update({f"conv{i+1}.{n}": m for n, m in block.named_children()})
@@ -115,12 +116,19 @@ class NetworkInNetwork(nn.Module):
             idx = out_index.get(key)
             if idx is not None:
                 out_feats[idx] = feat
-                
-        feat = self._feature_blocks[-1](feat)
-        key = 'classifier'
-        idx = out_index.get(key)
+        
+        gap = self._feature_blocks[-1].GlobalAveragePooling
+        fc  = self._feature_blocks[-1].Classifier
+
+        pen = gap(feat)
+        idx = out_index.get('penult')
         if idx is not None:
-            out_feats[idx] = feat
+            out_feats[idx] = pen
+
+        logits = fc(pen)
+        idx = out_index.get('classifier')
+        if idx is not None:
+            out_feats[idx] = logits
 
         return out_feats[0] if len(out_feats) == 1 else out_feats
 
