@@ -1,0 +1,151 @@
+import math
+
+import torch 
+import torch.nn as nn
+import torch.nn.functional as F
+
+from typing import Tuple, Optional
+
+class BasicBlock(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size): 
+        super(BasicBlock, self).__init__()
+        padding = (kernel_size - 1) // 2
+        self.layers = nn.Sequential()
+        self.layers.add_module('Conv', nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=1, padding=padding, bias=False))
+        self.layers.add_module('BatchNorm', nn.BatchNorm2d(out_planes))
+        self.layers.add_module('ReLU', nn.ReLU(inplace=True))
+
+    def forward(self, x): 
+        return self.layers(x) 
+
+class GlobalAveragePooling(nn.Module): 
+    def __init__(self): 
+        super(GlobalAveragePooling, self).__init__()         
+    
+    def forward(self, feat): 
+        num_channels = feat.size(1)
+        return F.avg_pool2d(feat, (feat.size(2), feat.size(3))).view(-1, num_channels)
+
+
+class audioCNN(nn.Module): 
+    def __init__(self, opt):
+        super(audioCNN, self).__init__()
+        num_classes = opt['num_classes']
+        num_inchannels = opt['num_inchannels'] if ('num_inchannels' in opt) else 3
+        num_stages = opt['num_stages'] if ('num_stages' in opt) else 3 
+        use_avg_on_conv3 = opt['use_avg_on_conv3'] if ('use_avg_on_conv3' in opt) else True
+
+        assert(num_stages >= 3)
+        nChannels = 192 
+        nChannels2 = 160 
+        nChannels3= 96
+
+        blocks = [nn.Sequential() for _ in range(num_stages)]
+
+        blocks[0].add_module('Block1_SubB1', BasicBlock(num_inchannels, nChannels, 5))
+        blocks[0].add_module('Block1_SubB2', BasicBlock(nChannels, nChannels2, 1))
+        blocks[0].add_module('Block1_SubB3', BasicBlock(nChannels2, nChannels3, 1))
+        blocks[0].add_module('Block1_MaxPool', nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+        
+        blocks[1].add_module('Block2_SubB1', BasicBlock(nChannels3, nChannels, 5))
+        blocks[1].add_module('Block2_SubB2', BasicBlock(nChannels, nChannels, 1))
+        blocks[1].add_module('Block2_SubB3', BasicBlock(nChannels, nChannels, 1))
+        blocks[1].add_module('Block2_AvgPool', nn.AvgPool2d(kernel_size=3, stride=2, padding=1))
+        
+        blocks[2].add_module('Block3_SubB1', BasicBlock(nChannels, nChannels, 3))
+        blocks[2].add_module('Block3_SubB2', BasicBlock(nChannels, nChannels, 1))
+        blocks[2].add_module('Block3_SubB3', BasicBlock(nChannels, nChannels, 1))
+        if num_stages > 3 and use_avg_on_conv3:
+            blocks[2].add_module('Block3_AvgPool', nn.AvgPool2d(kernel_size=3, stride=2, padding=1))
+
+        for s in range(3, num_stages):
+            blocks[s].add_module(f'Block{s+1}_SubB1', BasicBlock(nChannels, nChannels, 3))
+            blocks[s].add_module(f'Block{s+1}_SubB2', BasicBlock(nChannels, nChannels, 1))
+            blocks[s].add_module(f'Block{s+1}_SubB3', BasicBlock(nChannels, nChannels, 1))
+
+        blocks.append(nn.Sequential())
+        blocks[-1].add_module('GlobalAveragePooling', GlobalAveragePooling())
+        blocks[-1].add_module('Classifier', nn.Linear(nChannels, num_classes))
+
+        self._feature_blocks = nn.ModuleList(blocks)
+
+        self.all_feat_names = [] 
+        for s in range(num_stages): 
+            for child_name, _ in blocks[s].named_children():
+                self.all_feat_names.append(f'conv{s+1}.{child_name}')
+            self.all_feat_names.append(f'conv{s+1}')
+        self.all_feat_names.append('classifier')
+
+        self._feature_name_map = {"classifier": self._feature_blocks[-1]}
+        for i, block in enumerate(self._feature_blocks[:-1]): 
+            self._feature_name_map[f"conv{i+1}"] = block
+            self._feature_name_map.update({f"conv{i+1}.{n}": m for n , m in block.named_children()})
+
+    def _parse_out_keys_arg(self, out_feat_keys): 
+        out_feat_keys = [self.all_feat_names[-1]] if out_feat_keys is None else out_feat_keys
+        if len(out_feat_keys) ==0: 
+            raise ValueError('Empty list of output feature keys')
+        for f, key in enumerate(out_feat_keys): 
+            if key not in self.all_feat_names: 
+                raise ValueError(f'Feature with name {key} does not exist. Existing features: {self.all_feat_names}.')
+            elif key in out_feat_keys[:f]: 
+                raise ValueError(f'Duplicate output feature key: {key}.')
+            
+        return out_feat_keys
+    
+    def forward(self, x, out_feat_keys=None): 
+        out_feat_keys = self._parse_out_keys_arg(out_feat_keys)
+        out_index = {key: i for i, key in enumerate(out_feat_keys)}
+        out_feats = [None] * len(out_feat_keys)
+
+        feat = x
+        num_stages = len(self._feature_blocks) - 1
+
+        for s in range(num_stages): 
+            for child_name, child in self._feature_blocks[s].named_children(): 
+                feat = child(feat)
+                key = f'conv{s+1}.{child_name}'
+                idx = out_index.get(key)
+                if idx is not None: 
+                    out_feats[idx] = feat
+            key = f'conv{s+1}'
+            idx = out_index.get(key)
+            if idx is not None: 
+                out_feats[idx] = feat 
+
+        return out_feats[0] if len(out_feats) == 1 else out_feats
+        
+    def weight_initialization(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                if m.weight.requires_grad:
+                    n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                    m.weight.data.normal_(0, math.sqrt(2. / n))
+            elif isinstance(m, nn.BatchNorm2d):
+                if m.weight.requires_grad:
+                    m.weight.data.fill_(1)
+                if m.bias.requires_grad:
+                    m.bias.data.zero_()
+            elif isinstance(m, nn.Linear):
+                if m.bias.requires_grad:
+                    m.bias.data.zero_()
+
+    def get_feature_module(self, name):
+        return self._feature_name_map[name]
+    
+def create_model(opt):
+    return audioCNN(opt)
+
+if __name__ == '__main__':
+    size = 32
+    opt = {'num_classes': 4, 'num_stages': 5}
+
+    net = create_model(opt)
+    x = torch.autograd.Variable(torch.FloatTensor(1, 3, size, size).uniform_(-1, 1))
+
+    out = net(x, out_feat_keys=net.all_feat_names)
+    for f in range(len(out)):
+        print(f'Output feature {net.all_feat_names[f]} - size {out[f].size()}')
+
+    out = net(x)
+    print(f'Final output: {out.size()}')
