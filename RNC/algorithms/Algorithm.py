@@ -92,7 +92,8 @@ class Algorithm():
     def load_pretrained(self, network, pretrained_path):
         self.logger.info('==> Load pretrained parameters from file %s:' % pretrained_path)
         assert os.path.isfile(pretrained_path)
-        pretrained_model = torch.load(pretrained_path)
+        # pretrained_model = torch.load(pretrained_path)
+        pretrained_model = torch.load(pretrained_path, map_location="cpu")
         if pretrained_model['network'].keys() == network.state_dict().keys():
             network.load_state_dict(pretrained_model['network'])
         else:
