@@ -148,7 +148,10 @@ class NetworkInNetwork(nn.Module):
                     m.bias.data.zero_()
 
     def get_feature_module(self, name):
-        return self._feature_name_map[name]
+        m = self._feature_name_map[name]
+        if name.startswith("conv") and "." not in name and isinstance(m, nn.Sequential):
+            return list(m.children())[-1]  # last sub-block output
+        return m
     
 def create_model(opt):
     return NetworkInNetwork(opt)
