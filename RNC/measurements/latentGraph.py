@@ -14,7 +14,8 @@ Checkpoints (two common patterns):
 A) experiments/<exp>/model_net_epochXX            (nested to match config exp)
 B) experiments/<folder_name>/model_net_epochXX    (flat folder name)
 
-Use --exp_dir to explicitly point to the checkpoint folder to avoid ambiguity.
+✅ Recommended: pass --exp_dir to explicitly point to the checkpoint folder
+(e.g. experiments/CIFAR10_Jigsaw_NIN4blocks_...).
 
 Also supports your custom dataloader.py:
 - GenericDataset(dataset_name, split, ...)
@@ -23,10 +24,18 @@ Also supports your custom dataloader.py:
 Downstream CIFAR10 class separability:
 - We build dataset using dt from config (often data_test_opt),
 - BUT we force RotLoader(unsupervised=False) so y = CIFAR10 class labels.
+
+Outputs:
+- results/<exp_tag>_<ModelName>/bs<batch_size>/plots/
+  - latent_PCA2D_layer=..._ckptXX.png
+  - latent_PCA3D_layer=..._ckptXX.png
+  - latent_UMAP2D_layer=..._ckptXX.png  (if umap installed)
+  - latent_UMAP3D_layer=..._ckptXX.png  (if umap installed)
 """
 
 import argparse
 import importlib.util
+import os
 import random
 from pathlib import Path
 
@@ -298,15 +307,29 @@ def plot_scatter_3d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
 # ----------------------------
 def resolve_exp_dir(exp_root: Path, exp: str, exp_dir_override: str = None) -> Path:
     """
-    If exp_dir_override is provided, use it.
-    Else default to exp_root / exp  (nested to match config path).
+    Priority:
+      1) --exp_dir (explicit)
+      2) experiments/<exp>                 (nested pattern A)
+      3) experiments/<Path(exp).name>      (flat pattern B)  <-- your case
+
+    We return the first directory that exists. If none exist, return the nested default
+    so the error message shows where we looked.
     """
     if exp_dir_override is not None:
         p = Path(exp_dir_override)
-        return p if p.is_absolute() else (Path.cwd() / p).resolve()
+        p = p if p.is_absolute() else (Path.cwd() / p)
+        return p.resolve()
 
-    # default: experiments/<exp> (exp may contain slashes)
-    return (exp_root / exp).resolve()
+    cand_nested = (exp_root / exp).resolve()
+    cand_flat = (exp_root / Path(exp).name).resolve()
+
+    if cand_nested.is_dir():
+        return cand_nested
+    if cand_flat.is_dir():
+        return cand_flat
+
+    # Return nested default for clearer messaging downstream
+    return cand_nested
 
 
 # ----------------------------
@@ -326,7 +349,7 @@ def parse_args():
         help="epoch id XX for model_net_epochXX",
     )
 
-    # NEW: make checkpoint folder explicit when it doesn't match experiments/<exp>
+    # Checkpoint folder controls
     p.add_argument(
         "--exp_root",
         type=str,
@@ -337,9 +360,10 @@ def parse_args():
         "--exp_dir",
         type=str,
         default=None,
-        help="(RECOMMENDED when folders are flat) explicit checkpoint directory containing model_net_epochXX",
+        help="(RECOMMENDED for flat folders) explicit checkpoint directory containing model_net_epochXX",
     )
 
+    # Feature selection
     p.add_argument(
         "--layer",
         required=True,
@@ -352,10 +376,13 @@ def parse_args():
         help="Use NetworkInNetwork feature API: model(x, out_feat_keys=[layer]).",
     )
 
+    # Vectorization & sampling
     p.add_argument("--pool", type=str, default="gap", choices=["gap", "flatten"])
     p.add_argument("--max_batches", type=int, default=100)
     p.add_argument("--max_points", type=int, default=5000)
     p.add_argument("--standardize", action="store_true")
+
+    # UMAP params
     p.add_argument("--umap_neighbors", type=int, default=15)
     p.add_argument("--umap_min_dist", type=float, default=0.1)
     return p.parse_args()
@@ -383,16 +410,18 @@ if __name__ == "__main__":
     config = cfg_mod.config
 
     # 2) resolve checkpoint directory + set exp_dir for Algorithm
-    exp_root = Path(args.exp_root)
+    exp_root = Path(args.exp_root).resolve()
     exp_dir = resolve_exp_dir(exp_root=exp_root, exp=args.exp, exp_dir_override=args.exp_dir)
     config["exp_dir"] = str(exp_dir)
 
+    # 3) sanity: checkpoint file must exist
     ckpt_path = exp_dir / f"model_net_epoch{args.checkpoint}"
     if not ckpt_path.is_file():
         nearby = sorted(exp_dir.glob("model_net_epoch*"))
         preview = "\n".join([f"  - {p.name}" for p in nearby[:25]])
         raise FileNotFoundError(
             f"Checkpoint not found: {ckpt_path}\n"
+            f"Resolved exp_dir: {exp_dir}\n"
             f"Found {len(nearby)} files matching model_net_epoch* in {exp_dir}.\n"
             f"First few:\n{preview}"
         )
@@ -400,7 +429,7 @@ if __name__ == "__main__":
     print(f"[Checkpoint dir] {exp_dir}")
     print(f"[Checkpoint]     {ckpt_path.name}")
 
-    # 3) build loader using YOUR dataloader.py API
+    # 4) build loader using YOUR dataloader.py API
     from dataloader import GenericDataset, DataLoader as RotLoader
 
     dt = config.get("data_test_opt", config["data_train_opt"])
@@ -431,13 +460,14 @@ if __name__ == "__main__":
     )
     loader = rot_loader(epoch=0)
 
-    # 4) instantiate algorithm + load checkpoint
+    # 5) instantiate algorithm + load checkpoint
     import algorithms as alg
 
     algo = getattr(alg, config["algorithm_type"])(config)
     if use_cuda:
         algo.load_to_gpu()
 
+    # uses config['exp_dir'] internally
     algo.load_checkpoint(args.checkpoint, train=False)
 
     feat_extractor = algo.networks.get(
@@ -450,7 +480,7 @@ if __name__ == "__main__":
         print("Available feature keys:")
         print(model.all_feat_names)
 
-    # 5) collect embeddings
+    # 6) collect embeddings
     if args.feature_api:
         X, y = collect_embeddings_feature_api(
             model=model,
@@ -476,7 +506,7 @@ if __name__ == "__main__":
     if args.standardize:
         X = (X - X.mean(axis=0, keepdims=True)) / (X.std(axis=0, keepdims=True) + 1e-5)
 
-    # 6) reductions
+    # 7) reductions
     Z_pca_2 = pca_nd(X, 2)
     Z_pca_3 = pca_nd(X, 3)
 
@@ -488,7 +518,7 @@ if __name__ == "__main__":
         Z_umap_3 = None
         print("WARNING: umap-learn not installed; skipping UMAP plots. Install with: pip install umap-learn")
 
-    # 7) save plots
+    # 8) save plots
     exp_tag = args.exp.replace("/", "__")
     save_dir = Path("results") / f"{exp_tag}_{type(model).__name__}" / f"bs{batch_size}"
     plots_dir = save_dir / "plots"
