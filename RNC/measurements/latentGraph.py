@@ -1,37 +1,24 @@
 #!/usr/bin/env python
 # coding: utf-8
-
 """
-Latent space visualization (PCA + UMAP) in 2D and 3D for your RotNet/Neural-Collapse repo.
+Latent space visualization (PCA + UMAP) in 2D and 3D.
 
-Key features:
-- Works with your custom dataloader.GenericDataset + dataloader.DataLoader wrapper
-- Lets you extract features via:
-  (A) NetworkInNetwork feature API: model(x, out_feat_keys=[key])  [recommended]
-  (B) Forward hook on a named module (brittle, but generic)
-- Colors points by labels from the visualization loader.
-  IMPORTANT: If you want CIFAR10 *semantic* separability, this script forces unsupervised=False
-  for visualization, so labels are CIFAR10 classes (0..9), even if the model was trained unsupervised.
+Designed for your repo:
+- config/<exp>.py
+- experiments/<exp>/model_net_epochXX  (glob structure you showed)
 
-Example usage (feature API):
-python -m measurements.latentGraph \
-  --exp GPU_Collapsed_Jigsaw_Collapsed_LatentSPACE \
-  --checkpoint 200 \
-  --feature_api \
-  --layer penult \
-  --pool gap \
-  --max_batches 100 \
-  --max_points 5000 \
-  --standardize
+Also designed for your custom dataloader.py:
+- GenericDataset(dataset_name, split, ...)
+- DataLoader(dataset, ...) returning an iterator via loader(epoch)
 
-For 4 conv blocks:
-for L in conv1 conv2 conv3 conv4 penult; do
-  python -m measurements.latentGraph --exp GPU_Collapsed_Jigsaw_Collapsed_LatentSPACE --checkpoint 200 --feature_api --layer $L --pool gap --standardize
-done
+Key idea for *downstream CIFAR10 class separability*:
+- We build the dataset using dt from config (usually data_test_opt),
+- BUT we force RotLoader(unsupervised=False) so the returned y are CIFAR10 class labels.
 """
 
 import argparse
 import importlib.util
+import os
 import random
 from pathlib import Path
 
@@ -63,7 +50,7 @@ def set_seed(seed: int):
 
 
 # ----------------------------
-# Helpers
+# Feature extraction helpers
 # ----------------------------
 def get_module_by_name(model: nn.Module, name: str) -> nn.Module:
     for n, m in model.named_modules():
@@ -85,7 +72,7 @@ def _feat_to_vec(feat: torch.Tensor, pool: str) -> torch.Tensor:
 
 
 def _label_to_numpy(y_batch):
-    # if dataset yields extra labels, take first by default
+    # Your dataloader sometimes returns LongTensor([label]) etc.
     if isinstance(y_batch, (tuple, list)):
         y_batch = y_batch[0]
     if torch.is_tensor(y_batch):
@@ -95,9 +82,6 @@ def _label_to_numpy(y_batch):
     return y_np.reshape(-1)
 
 
-# ----------------------------
-# Embedding collection
-# ----------------------------
 @torch.no_grad()
 def collect_embeddings_hook(
     model: nn.Module,
@@ -108,7 +92,9 @@ def collect_embeddings_hook(
     max_batches: int = 100,
     max_points: int = 5000,
 ):
-    """Generic hook-based extractor: module_name must exist in model.named_modules()."""
+    """
+    Generic hook-based extractor: module_name must exist in model.named_modules().
+    """
     model.eval()
     stash = {"feat": None}
 
@@ -148,7 +134,6 @@ def collect_embeddings_hook(
             break
 
     hook_handle.remove()
-
     X = np.concatenate(X_list, axis=0)[:max_points]
     y = np.concatenate(y_list, axis=0)[:max_points]
     return X, y
@@ -166,8 +151,7 @@ def collect_embeddings_feature_api(
 ):
     """
     NetworkInNetwork-style extractor: uses model(x, out_feat_keys=[feature_key]).
-    feature_key should be one of model.all_feat_names (e.g., 'conv1', 'conv2', ..., 'penult', 'classifier',
-    or finer: 'conv2.Block2_ConvB3').
+    feature_key should be one of model.all_feat_names: e.g. 'conv1', 'conv2', ..., 'penult', etc.
     """
     model.eval()
     X_list, y_list = [], []
@@ -252,12 +236,12 @@ def plot_scatter_2d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
     plt.ylabel("Dim 2")
 
     handles, labels = [], []
+    denom = max(1, (len(classes) - 1))
     for i, c in enumerate(classes):
         handles.append(
             plt.Line2D(
-                [], [], marker='o', linestyle='', markersize=6,
-                markerfacecolor=sc.cmap(i / max(1, (len(classes) - 1))),
-                markeredgecolor='none'
+                [], [], marker="o", linestyle="", markersize=6,
+                markerfacecolor=sc.cmap(i / denom), markeredgecolor="none"
             )
         )
         labels.append(str(c))
@@ -287,12 +271,12 @@ def plot_scatter_3d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
     ax.set_zlabel("Dim 3")
 
     handles, labels = [], []
+    denom = max(1, (len(classes) - 1))
     for i, c in enumerate(classes):
         handles.append(
             plt.Line2D(
-                [], [], marker='o', linestyle='', markersize=6,
-                markerfacecolor=sc.cmap(i / max(1, (len(classes) - 1))),
-                markeredgecolor='none'
+                [], [], marker="o", linestyle="", markersize=6,
+                markerfacecolor=sc.cmap(i / denom), markeredgecolor="none"
             )
         )
         labels.append(str(c))
@@ -308,26 +292,44 @@ def plot_scatter_3d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
 # ----------------------------
 def parse_args():
     p = argparse.ArgumentParser("Graphing the latent space (PCA + UMAP, 2D + 3D)")
-    p.add_argument('--exp', required=True,
-                   help='experiment name (config/<exp>.py and experiments/<exp>/model_net_epochXX)')
-    p.add_argument('--checkpoint', type=int, default=0,
-                   help='epoch id XX for model_net_epochXX')
-    p.add_argument('--exp_dir', default=None,
-                   help="optional override: full path to experiments/<exp> directory")
+    p.add_argument(
+        "--exp",
+        required=True,
+        help="experiment name (config/<exp>.py and experiments/<exp>/model_net_epochXX)",
+    )
+    p.add_argument(
+        "--checkpoint",
+        type=int,
+        required=True,
+        help="epoch id XX for model_net_epochXX (IMPORTANT: do not omit this)",
+    )
+    p.add_argument(
+        "--exp_root",
+        type=str,
+        default="experiments",
+        help="root experiments folder (default: experiments)",
+    )
 
-    p.add_argument('--layer', required=True,
-                   help="If --feature_api: a feature key (e.g., 'penult'/'conv1'). Otherwise: module name from named_modules().")
-    p.add_argument('--feature_api', action='store_true',
-                   help="Use NetworkInNetwork feature API: model(x, out_feat_keys=[layer]). Recommended for your NIN.")
+    p.add_argument(
+        "--layer",
+        required=True,
+        help="If --feature_api: feature key (e.g., 'conv1','conv2','conv3','conv4','penult'). "
+             "Else: module name from model.named_modules().",
+    )
+    p.add_argument(
+        "--feature_api",
+        action="store_true",
+        help="Use NetworkInNetwork feature API: model(x, out_feat_keys=[layer]). Recommended for your NIN.",
+    )
 
-    p.add_argument('--pool', type=str, default='gap', choices=['gap', 'flatten'])
-    p.add_argument('--max_batches', type=int, default=100)
-    p.add_argument('--max_points', type=int, default=5000)
+    p.add_argument("--pool", type=str, default="gap", choices=["gap", "flatten"])
+    p.add_argument("--max_batches", type=int, default=100)
+    p.add_argument("--max_points", type=int, default=5000)
 
-    p.add_argument('--standardize', action='store_true')
+    p.add_argument("--standardize", action="store_true")
 
-    p.add_argument('--umap_neighbors', type=int, default=15)
-    p.add_argument('--umap_min_dist', type=float, default=0.1)
+    p.add_argument("--umap_neighbors", type=int, default=15)
+    p.add_argument("--umap_min_dist", type=float, default=0.1)
 
     return p.parse_args()
 
@@ -335,15 +337,16 @@ def parse_args():
 # ----------------------------
 # Main
 # ----------------------------
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = parse_args()
     set_seed(42)
 
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
+    print(f"Using device: {device}")
 
     # 1) load config
-    cfg_file = Path('config') / f"{args.exp}.py"
+    cfg_file = Path("config") / f"{args.exp}.py"
     if not cfg_file.exists():
         raise FileNotFoundError(f"Config file not found: {cfg_file}")
 
@@ -352,61 +355,76 @@ if __name__ == '__main__':
     spec.loader.exec_module(cfg_mod)
     config = cfg_mod.config
 
-    # IMPORTANT: Algorithm expects config['exp_dir'] BEFORE instantiation
-    exp_dir = Path(args.exp_dir) if args.exp_dir else (Path('experiments') / args.exp)
-    config['exp_dir'] = str(exp_dir)
+    # 2) set exp_dir (Algorithm requires this)
+    exp_dir = Path(args.exp_root) / args.exp
+    config["exp_dir"] = str(exp_dir)
 
-    # 2) build loader (repo-style)
+    # sanity: checkpoint file must exist (your error was missing --checkpoint => epoch 0)
+    ckpt_path = exp_dir / f"model_net_epoch{args.checkpoint}"
+    if not ckpt_path.is_file():
+        nearby = sorted(exp_dir.glob("model_net_epoch*"))
+        preview = "\n".join([f"  - {p.name}" for p in nearby[:25]])
+        raise FileNotFoundError(
+            f"Checkpoint not found: {ckpt_path}\n"
+            f"Found {len(nearby)} files matching model_net_epoch* in {exp_dir}.\n"
+            f"First few:\n{preview}"
+        )
+
+    # 3) build loader using YOUR dataloader.py API
     from dataloader import GenericDataset, DataLoader as RotLoader
 
-    dt = config.get('data_test_opt', config['data_train_opt'])
+    dt = config.get("data_test_opt", config["data_train_opt"])
+    batch_size = int(dt.get("batch_size", 128))
 
-    dataset_name = dt.get('dataset_name', 'cifar10')
-    split = dt.get('split', 'test')
+    dataset_name = dt.get("dataset_name", "cifar10")
+    split = dt.get("split", "test")
 
     dataset = GenericDataset(
-        dataset_name,
-        split,
-        random_sized_crop=dt.get('random_sized_crop', False),
-        pretext_mode=dt.get('pretext_mode', 'rotation'),
-        sigmas=dt.get('sigmas', None),
-        kernel_sizes=dt.get('kernel_sizes', None),
-        patch_jitter=dt.get('patch_jitter', 0),
-        color_distort=dt.get('color_distort', False),
-        color_dist_strength=dt.get('color_dist_strength', 1.0),
-        fixed_perms=dt.get('fixed_perms', None),
+        dataset_name=dataset_name,
+        split=split,
+        random_sized_crop=dt.get("random_sized_crop", False),
+        num_imgs_per_cat=dt.get("num_imgs_per_cat", None),
+        pretext_mode=dt.get("pretext_mode", "rotation"),
+        sigmas=dt.get("sigmas", None),
+        kernel_sizes=dt.get("kernel_sizes", None),
+        patch_jitter=dt.get("patch_jitter", 0),
+        color_distort=dt.get("color_distort", False),
+        color_dist_strength=dt.get("color_dist_strength", 1.0),
+        fixed_perms=dt.get("fixed_perms", None),
     )
 
-    # For downstream separability (CIFAR10 classes), force supervised labels:
+    # downstream separability (CIFAR10 classes): FORCE supervised labels
     rot_loader = RotLoader(
         dataset,
-        batch_size=dt.get('batch_size', 128),
-        unsupervised=False,  # <-- label is CIFAR10 class (0..9)
-        epoch_size=dt.get('epoch_size', None),
+        batch_size=batch_size,
+        unsupervised=False,  # <-- y = CIFAR10 class label
+        epoch_size=dt.get("epoch_size", None),
         num_workers=4,
-        shuffle=False
+        shuffle=False,
     )
+    loader = rot_loader(epoch=0)  # <-- this is iterable
 
-    loader = rot_loader(epoch=0)
-
-    # 3) instantiate algo + load checkpoint
+    # 4) instantiate algorithm + load checkpoint
     import algorithms as alg
-    algo = getattr(alg, config['algorithm_type'])(config)
+
+    algo = getattr(alg, config["algorithm_type"])(config)
     if use_cuda:
         algo.load_to_gpu()
 
+    # algo.load_checkpoint(epoch) should load experiments/<exp>/model_net_epochXX internally
     algo.load_checkpoint(args.checkpoint, train=False)
 
     feat_extractor = algo.networks.get(
-        'feat_extractor',
-        algo.networks.get('model', list(algo.networks.values())[0])
+        "feat_extractor",
+        algo.networks.get("model", list(algo.networks.values())[0]),
     )
     model = feat_extractor.to(device)
 
     if args.feature_api and hasattr(model, "all_feat_names"):
-        print("Available feature keys:", model.all_feat_names)
+        print("Available feature keys:")
+        print(model.all_feat_names)
 
-    # 4) collect embeddings
+    # 5) collect embeddings
     if args.feature_api:
         X, y = collect_embeddings_feature_api(
             model=model,
@@ -415,7 +433,7 @@ if __name__ == '__main__':
             device=device,
             pool=args.pool,
             max_batches=args.max_batches,
-            max_points=args.max_points
+            max_points=args.max_points,
         )
     else:
         X, y = collect_embeddings_hook(
@@ -425,19 +443,15 @@ if __name__ == '__main__':
             device=device,
             pool=args.pool,
             max_batches=args.max_batches,
-            max_points=args.max_points
+            max_points=args.max_points,
         )
-
-    # Sanity check labels
-    u = np.unique(y)
-    print(f"[Labels] unique={u[:20]} ... (count={len(u)})")
 
     # standardize (recommended)
     X = X.astype(np.float32)
     if args.standardize:
         X = (X - X.mean(axis=0, keepdims=True)) / (X.std(axis=0, keepdims=True) + 1e-5)
 
-    # 5) reductions
+    # 6) reductions
     Z_pca_2 = pca_nd(X, 2)
     Z_pca_3 = pca_nd(X, 3)
 
@@ -449,13 +463,14 @@ if __name__ == '__main__':
         Z_umap_3 = None
         print("WARNING: umap-learn not installed; skipping UMAP plots. Install with: pip install umap-learn")
 
-    # 6) save plots
-    batch_size = dt.get('batch_size', 128)
-    save_dir = Path('results') / f"{args.exp}_{type(model).__name__}" / f"bs{batch_size}"
-    plots_dir = save_dir / 'plots'
+    # 7) save plots
+    # Put plots under results/<exp>... but sanitize slashes so it doesn't nest forever
+    exp_tag = args.exp.replace("/", "__")
+    save_dir = Path("results") / f"{exp_tag}_{type(model).__name__}" / f"bs{batch_size}"
+    plots_dir = save_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    layer_tag = args.layer.replace('.', '_')
+    layer_tag = args.layer.replace(".", "_")
     ckpt_tag = f"ckpt{args.checkpoint}"
 
     pca2_path = plots_dir / f"latent_PCA2D_layer={layer_tag}_{ckpt_tag}.png"
