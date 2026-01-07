@@ -261,15 +261,40 @@ if __name__ == '__main__':
     config = cfg_mod.config
 
     # 2) build loader (repo-style)
+    # 2) build loader (repo-style)
     from dataloader import GenericDataset, DataLoader as RotLoader
 
     dt = config.get('data_test_opt', config['data_train_opt'])
-    batch_size = dt['batch_size']
-    split = dt.get('split', 'test')  # <-- FIX: GenericDataset needs split
 
-    # --- FIX: pass split as required arg ---
-    dataset = GenericDataset(dt, split)
-    loader = RotLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    dataset_name = dt.get('dataset_name', 'cifar10')
+    split = dt.get('split', 'test')
+
+    # Build the dataset with correct signature
+    dataset = GenericDataset(
+        dataset_name=dataset_name,
+        split=split,
+        random_sized_crop=dt.get('random_sized_crop', False),
+        pretext_mode=dt.get('pretext_mode', 'rotation'),
+        sigmas=dt.get('sigmas', None),
+        kernel_sizes=dt.get('kernel_sizes', None),
+        patch_jitter=dt.get('patch_jitter', 0),
+        color_distort=dt.get('color_distort', False),
+        color_dist_strength=dt.get('color_dist_strength', 1.0),
+        fixed_perms=dt.get('fixed_perms', None),
+    )
+
+    # IMPORTANT:
+    # For downstream separability (CIFAR10 classes), force supervised labels:
+    rot_loader = RotLoader(
+        dataset,
+        batch_size=dt.get('batch_size', 128),
+        unsupervised=False,          # <-- THIS makes y = CIFAR10 class label
+        epoch_size=dt.get('epoch_size', None),
+        num_workers=4,
+        shuffle=False
+    )
+
+    loader = rot_loader(epoch=0)     # <-- THIS is the iterable you loop over
 
     # 3) instantiate algo + load checkpoint
     import algorithms as alg
