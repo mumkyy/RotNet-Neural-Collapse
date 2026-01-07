@@ -1,6 +1,35 @@
 #!/usr/bin/env python
 # coding: utf-8
 
+"""
+Latent space visualization (PCA + UMAP) in 2D and 3D for your RotNet/Neural-Collapse repo.
+
+Key features:
+- Works with your custom dataloader.GenericDataset + dataloader.DataLoader wrapper
+- Lets you extract features via:
+  (A) NetworkInNetwork feature API: model(x, out_feat_keys=[key])  [recommended]
+  (B) Forward hook on a named module (brittle, but generic)
+- Colors points by labels from the visualization loader.
+  IMPORTANT: If you want CIFAR10 *semantic* separability, this script forces unsupervised=False
+  for visualization, so labels are CIFAR10 classes (0..9), even if the model was trained unsupervised.
+
+Example usage (feature API):
+python -m measurements.latentGraph \
+  --exp GPU_Collapsed_Jigsaw_Collapsed_LatentSPACE \
+  --checkpoint 200 \
+  --feature_api \
+  --layer penult \
+  --pool gap \
+  --max_batches 100 \
+  --max_points 5000 \
+  --standardize
+
+For 4 conv blocks:
+for L in conv1 conv2 conv3 conv4 penult; do
+  python -m measurements.latentGraph --exp GPU_Collapsed_Jigsaw_Collapsed_LatentSPACE --checkpoint 200 --feature_api --layer $L --pool gap --standardize
+done
+"""
+
 import argparse
 import importlib.util
 import random
@@ -21,6 +50,9 @@ except Exception:
     _HAS_UMAP = False
 
 
+# ----------------------------
+# Repro
+# ----------------------------
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -30,12 +62,18 @@ def set_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
+# ----------------------------
+# Helpers
+# ----------------------------
 def get_module_by_name(model: nn.Module, name: str) -> nn.Module:
     for n, m in model.named_modules():
         if n == name:
             return m
     candidates = [n for n, _ in model.named_modules() if name in n][:25]
-    raise KeyError(f"Layer '{name}' not found in named_modules(). Candidates containing '{name}': {candidates}")
+    raise KeyError(
+        f"Layer '{name}' not found in named_modules(). "
+        f"Candidates containing '{name}': {candidates}"
+    )
 
 
 def _feat_to_vec(feat: torch.Tensor, pool: str) -> torch.Tensor:
@@ -47,6 +85,7 @@ def _feat_to_vec(feat: torch.Tensor, pool: str) -> torch.Tensor:
 
 
 def _label_to_numpy(y_batch):
+    # if dataset yields extra labels, take first by default
     if isinstance(y_batch, (tuple, list)):
         y_batch = y_batch[0]
     if torch.is_tensor(y_batch):
@@ -56,9 +95,20 @@ def _label_to_numpy(y_batch):
     return y_np.reshape(-1)
 
 
+# ----------------------------
+# Embedding collection
+# ----------------------------
 @torch.no_grad()
-def collect_embeddings_hook(model: nn.Module, loader, module_name: str, device: torch.device,
-                           pool: str = "gap", max_batches: int = 100, max_points: int = 5000):
+def collect_embeddings_hook(
+    model: nn.Module,
+    loader,
+    module_name: str,
+    device: torch.device,
+    pool: str = "gap",
+    max_batches: int = 100,
+    max_points: int = 5000,
+):
+    """Generic hook-based extractor: module_name must exist in model.named_modules()."""
     model.eval()
     stash = {"feat": None}
 
@@ -105,8 +155,20 @@ def collect_embeddings_hook(model: nn.Module, loader, module_name: str, device: 
 
 
 @torch.no_grad()
-def collect_embeddings_feature_api(model: nn.Module, loader, feature_key: str, device: torch.device,
-                                  pool: str = "gap", max_batches: int = 100, max_points: int = 5000):
+def collect_embeddings_feature_api(
+    model: nn.Module,
+    loader,
+    feature_key: str,
+    device: torch.device,
+    pool: str = "gap",
+    max_batches: int = 100,
+    max_points: int = 5000,
+):
+    """
+    NetworkInNetwork-style extractor: uses model(x, out_feat_keys=[feature_key]).
+    feature_key should be one of model.all_feat_names (e.g., 'conv1', 'conv2', ..., 'penult', 'classifier',
+    or finer: 'conv2.Block2_ConvB3').
+    """
     model.eval()
     X_list, y_list = [], []
     seen = 0
@@ -137,13 +199,22 @@ def collect_embeddings_feature_api(model: nn.Module, loader, feature_key: str, d
     return X, y
 
 
+# ----------------------------
+# PCA / UMAP
+# ----------------------------
 def pca_nd(X: np.ndarray, n_components: int) -> np.ndarray:
     Xc = X - X.mean(axis=0, keepdims=True)
     _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
     return Xc @ Vt[:n_components].T
 
 
-def umap_nd(X: np.ndarray, n_components: int, seed: int = 42, n_neighbors: int = 15, min_dist: float = 0.1) -> np.ndarray:
+def umap_nd(
+    X: np.ndarray,
+    n_components: int,
+    seed: int = 42,
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+) -> np.ndarray:
     if not _HAS_UMAP:
         raise ImportError("UMAP requested but umap-learn is not installed. Install with: pip install umap-learn")
     reducer = umap_lib.UMAP(
@@ -156,6 +227,9 @@ def umap_nd(X: np.ndarray, n_components: int, seed: int = 42, n_neighbors: int =
     return reducer.fit_transform(X)
 
 
+# ----------------------------
+# Plotting
+# ----------------------------
 def _make_label_colors(y: np.ndarray):
     classes = np.unique(y)
     classes_sorted = np.sort(classes)
@@ -179,8 +253,13 @@ def plot_scatter_2d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
 
     handles, labels = [], []
     for i, c in enumerate(classes):
-        handles.append(plt.Line2D([], [], marker='o', linestyle='', markersize=6,
-                                  markerfacecolor=sc.cmap(i / max(1, (len(classes)-1))), markeredgecolor='none'))
+        handles.append(
+            plt.Line2D(
+                [], [], marker='o', linestyle='', markersize=6,
+                markerfacecolor=sc.cmap(i / max(1, (len(classes) - 1))),
+                markeredgecolor='none'
+            )
+        )
         labels.append(str(c))
     plt.legend(handles, labels, fontsize=8, frameon=False, loc="best", ncol=2)
 
@@ -209,8 +288,13 @@ def plot_scatter_3d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
 
     handles, labels = [], []
     for i, c in enumerate(classes):
-        handles.append(plt.Line2D([], [], marker='o', linestyle='', markersize=6,
-                                  markerfacecolor=sc.cmap(i / max(1, (len(classes)-1))), markeredgecolor='none'))
+        handles.append(
+            plt.Line2D(
+                [], [], marker='o', linestyle='', markersize=6,
+                markerfacecolor=sc.cmap(i / max(1, (len(classes) - 1))),
+                markeredgecolor='none'
+            )
+        )
         labels.append(str(c))
     ax.legend(handles, labels, fontsize=8, frameon=False, loc="best", ncol=2)
 
@@ -219,12 +303,17 @@ def plot_scatter_3d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
     plt.close()
 
 
+# ----------------------------
+# CLI
+# ----------------------------
 def parse_args():
     p = argparse.ArgumentParser("Graphing the latent space (PCA + UMAP, 2D + 3D)")
     p.add_argument('--exp', required=True,
                    help='experiment name (config/<exp>.py and experiments/<exp>/model_net_epochXX)')
     p.add_argument('--checkpoint', type=int, default=0,
                    help='epoch id XX for model_net_epochXX')
+    p.add_argument('--exp_dir', default=None,
+                   help="optional override: full path to experiments/<exp> directory")
 
     p.add_argument('--layer', required=True,
                    help="If --feature_api: a feature key (e.g., 'penult'/'conv1'). Otherwise: module name from named_modules().")
@@ -243,6 +332,9 @@ def parse_args():
     return p.parse_args()
 
 
+# ----------------------------
+# Main
+# ----------------------------
 if __name__ == '__main__':
     args = parse_args()
     set_seed(42)
@@ -260,7 +352,10 @@ if __name__ == '__main__':
     spec.loader.exec_module(cfg_mod)
     config = cfg_mod.config
 
-    # 2) build loader (repo-style)
+    # IMPORTANT: Algorithm expects config['exp_dir'] BEFORE instantiation
+    exp_dir = Path(args.exp_dir) if args.exp_dir else (Path('experiments') / args.exp)
+    config['exp_dir'] = str(exp_dir)
+
     # 2) build loader (repo-style)
     from dataloader import GenericDataset, DataLoader as RotLoader
 
@@ -269,10 +364,9 @@ if __name__ == '__main__':
     dataset_name = dt.get('dataset_name', 'cifar10')
     split = dt.get('split', 'test')
 
-    # Build the dataset with correct signature
     dataset = GenericDataset(
-        dataset_name=dataset_name,
-        split=split,
+        dataset_name,
+        split,
         random_sized_crop=dt.get('random_sized_crop', False),
         pretext_mode=dt.get('pretext_mode', 'rotation'),
         sigmas=dt.get('sigmas', None),
@@ -283,18 +377,17 @@ if __name__ == '__main__':
         fixed_perms=dt.get('fixed_perms', None),
     )
 
-    # IMPORTANT:
     # For downstream separability (CIFAR10 classes), force supervised labels:
     rot_loader = RotLoader(
         dataset,
         batch_size=dt.get('batch_size', 128),
-        unsupervised=False,          # <-- THIS makes y = CIFAR10 class label
+        unsupervised=False,  # <-- label is CIFAR10 class (0..9)
         epoch_size=dt.get('epoch_size', None),
         num_workers=4,
         shuffle=False
     )
 
-    loader = rot_loader(epoch=0)     # <-- THIS is the iterable you loop over
+    loader = rot_loader(epoch=0)
 
     # 3) instantiate algo + load checkpoint
     import algorithms as alg
@@ -335,6 +428,10 @@ if __name__ == '__main__':
             max_points=args.max_points
         )
 
+    # Sanity check labels
+    u = np.unique(y)
+    print(f"[Labels] unique={u[:20]} ... (count={len(u)})")
+
     # standardize (recommended)
     X = X.astype(np.float32)
     if args.standardize:
@@ -353,6 +450,7 @@ if __name__ == '__main__':
         print("WARNING: umap-learn not installed; skipping UMAP plots. Install with: pip install umap-learn")
 
     # 6) save plots
+    batch_size = dt.get('batch_size', 128)
     save_dir = Path('results') / f"{args.exp}_{type(model).__name__}" / f"bs{batch_size}"
     plots_dir = save_dir / 'plots'
     plots_dir.mkdir(parents=True, exist_ok=True)
