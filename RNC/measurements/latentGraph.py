@@ -356,7 +356,7 @@ if __name__ == "__main__":
     config = cfg_mod.config
 
     # 2) set exp_dir (Algorithm requires this)
-    exp_dir = Path(args.exp_root) / args.exp
+    exp_dir = Path(args.exp_root)
     config["exp_dir"] = str(exp_dir)
 
     # sanity: checkpoint file must exist (your error was missing --checkpoint => epoch 0)
