@@ -92,6 +92,12 @@ class ClassificationModel(Algorithm):
             loss_total = crit(pred_var, y_oh)
         else:
             loss_total = crit(pred_var, labels_var)
+        loss_cls = loss_total
+        nc1_penalty_total = 0.0
+        nc1_value_total = 0.0
+        nc1_sw_total = 0.0
+        nc1_sb_total = 0.0
+        nc1_layers = 0
 
         # --- NC1 penalty ---
         #no warmup
@@ -127,12 +133,24 @@ class ClassificationModel(Algorithm):
 
                 w = self.opt['nc_reg']['weights'][layer]
                 loss_total = loss_total + w * penalty
+                nc1_penalty_total += (w * penalty).item()
+                nc1_value_total += nc1.item()
+                nc1_sw_total += trace_Sw.item()
+                nc1_sb_total += trace_Sb.item()
+                nc1_layers += 1
 
 
         record = {}
         # precision still computed on raw logits
         record['prec1'] = accuracy(pred_var.detach(), labels_var, topk=(1,))[0].item()
         record['loss']  = loss_total.item()
+        record['loss_cls'] = loss_cls.item()
+        if nc1_layers > 0:
+            record['nc1'] = nc1_value_total / nc1_layers
+            record['nc1_penalty'] = nc1_penalty_total
+            record['nc1_sw'] = nc1_sw_total / nc1_layers
+            record['nc1_sb'] = nc1_sb_total / nc1_layers
+            record['nc1_layers'] = nc1_layers
         #********************************************************
 
         #****** BACKPROPAGATE AND APPLY OPTIMIZATION STEP *******
