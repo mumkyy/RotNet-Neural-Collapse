@@ -3,22 +3,30 @@
 """
 Latent space visualization (PCA + UMAP) in 2D and 3D.
 
-Designed for your repo:
-- config/<exp>.py
-- experiments/<exp>/model_net_epochXX  (glob structure you showed)
+Supports your repo layout variants:
 
-Also designed for your custom dataloader.py:
+Config:
+  config/<exp>.py
+where <exp> can be nested like:
+  CIFAR10/jigsaw/MSE/collapsed/backbone/NAME
+
+Checkpoints (two common patterns):
+A) experiments/<exp>/model_net_epochXX            (nested to match config exp)
+B) experiments/<folder_name>/model_net_epochXX    (flat folder name)
+
+Use --exp_dir to explicitly point to the checkpoint folder to avoid ambiguity.
+
+Also supports your custom dataloader.py:
 - GenericDataset(dataset_name, split, ...)
 - DataLoader(dataset, ...) returning an iterator via loader(epoch)
 
-Key idea for *downstream CIFAR10 class separability*:
-- We build the dataset using dt from config (usually data_test_opt),
-- BUT we force RotLoader(unsupervised=False) so the returned y are CIFAR10 class labels.
+Downstream CIFAR10 class separability:
+- We build dataset using dt from config (often data_test_opt),
+- BUT we force RotLoader(unsupervised=False) so y = CIFAR10 class labels.
 """
 
 import argparse
 import importlib.util
-import os
 import random
 from pathlib import Path
 
@@ -92,9 +100,7 @@ def collect_embeddings_hook(
     max_batches: int = 100,
     max_points: int = 5000,
 ):
-    """
-    Generic hook-based extractor: module_name must exist in model.named_modules().
-    """
+    """Generic hook-based extractor: module_name must exist in model.named_modules()."""
     model.eval()
     stash = {"feat": None}
 
@@ -151,7 +157,7 @@ def collect_embeddings_feature_api(
 ):
     """
     NetworkInNetwork-style extractor: uses model(x, out_feat_keys=[feature_key]).
-    feature_key should be one of model.all_feat_names: e.g. 'conv1', 'conv2', ..., 'penult', etc.
+    feature_key should be one of model.all_feat_names: e.g. 'conv1','conv2','conv3','conv4','penult',...
     """
     model.eval()
     X_list, y_list = [], []
@@ -288,6 +294,22 @@ def plot_scatter_3d(Z: np.ndarray, y: np.ndarray, title: str, save_path: Path, m
 
 
 # ----------------------------
+# Path resolution
+# ----------------------------
+def resolve_exp_dir(exp_root: Path, exp: str, exp_dir_override: str = None) -> Path:
+    """
+    If exp_dir_override is provided, use it.
+    Else default to exp_root / exp  (nested to match config path).
+    """
+    if exp_dir_override is not None:
+        p = Path(exp_dir_override)
+        return p if p.is_absolute() else (Path.cwd() / p).resolve()
+
+    # default: experiments/<exp> (exp may contain slashes)
+    return (exp_root / exp).resolve()
+
+
+# ----------------------------
 # CLI
 # ----------------------------
 def parse_args():
@@ -295,42 +317,47 @@ def parse_args():
     p.add_argument(
         "--exp",
         required=True,
-        help="experiment name (config/<exp>.py and experiments/<exp>/model_net_epochXX)",
+        help="config path: config/<exp>.py (can include CIFAR10/jigsaw/...)",
     )
     p.add_argument(
         "--checkpoint",
         type=int,
         required=True,
-        help="epoch id XX for model_net_epochXX (IMPORTANT: do not omit this)",
+        help="epoch id XX for model_net_epochXX",
     )
+
+    # NEW: make checkpoint folder explicit when it doesn't match experiments/<exp>
     p.add_argument(
         "--exp_root",
         type=str,
         default="experiments",
         help="root experiments folder (default: experiments)",
     )
+    p.add_argument(
+        "--exp_dir",
+        type=str,
+        default=None,
+        help="(RECOMMENDED when folders are flat) explicit checkpoint directory containing model_net_epochXX",
+    )
 
     p.add_argument(
         "--layer",
         required=True,
-        help="If --feature_api: feature key (e.g., 'conv1','conv2','conv3','conv4','penult'). "
+        help="If --feature_api: feature key ('conv1','conv2','conv3','conv4','penult'). "
              "Else: module name from model.named_modules().",
     )
     p.add_argument(
         "--feature_api",
         action="store_true",
-        help="Use NetworkInNetwork feature API: model(x, out_feat_keys=[layer]). Recommended for your NIN.",
+        help="Use NetworkInNetwork feature API: model(x, out_feat_keys=[layer]).",
     )
 
     p.add_argument("--pool", type=str, default="gap", choices=["gap", "flatten"])
     p.add_argument("--max_batches", type=int, default=100)
     p.add_argument("--max_points", type=int, default=5000)
-
     p.add_argument("--standardize", action="store_true")
-
     p.add_argument("--umap_neighbors", type=int, default=15)
     p.add_argument("--umap_min_dist", type=float, default=0.1)
-
     return p.parse_args()
 
 
@@ -355,11 +382,11 @@ if __name__ == "__main__":
     spec.loader.exec_module(cfg_mod)
     config = cfg_mod.config
 
-    # 2) set exp_dir (Algorithm requires this)
-    exp_dir = Path(args.exp_root)
+    # 2) resolve checkpoint directory + set exp_dir for Algorithm
+    exp_root = Path(args.exp_root)
+    exp_dir = resolve_exp_dir(exp_root=exp_root, exp=args.exp, exp_dir_override=args.exp_dir)
     config["exp_dir"] = str(exp_dir)
 
-    # sanity: checkpoint file must exist (your error was missing --checkpoint => epoch 0)
     ckpt_path = exp_dir / f"model_net_epoch{args.checkpoint}"
     if not ckpt_path.is_file():
         nearby = sorted(exp_dir.glob("model_net_epoch*"))
@@ -370,18 +397,18 @@ if __name__ == "__main__":
             f"First few:\n{preview}"
         )
 
+    print(f"[Checkpoint dir] {exp_dir}")
+    print(f"[Checkpoint]     {ckpt_path.name}")
+
     # 3) build loader using YOUR dataloader.py API
     from dataloader import GenericDataset, DataLoader as RotLoader
 
     dt = config.get("data_test_opt", config["data_train_opt"])
     batch_size = int(dt.get("batch_size", 128))
 
-    dataset_name = dt.get("dataset_name", "cifar10")
-    split = dt.get("split", "test")
-
     dataset = GenericDataset(
-        dataset_name=dataset_name,
-        split=split,
+        dataset_name=dt.get("dataset_name", "cifar10"),
+        split=dt.get("split", "test"),
         random_sized_crop=dt.get("random_sized_crop", False),
         num_imgs_per_cat=dt.get("num_imgs_per_cat", None),
         pretext_mode=dt.get("pretext_mode", "rotation"),
@@ -397,12 +424,12 @@ if __name__ == "__main__":
     rot_loader = RotLoader(
         dataset,
         batch_size=batch_size,
-        unsupervised=False,  # <-- y = CIFAR10 class label
+        unsupervised=False,  # y = CIFAR10 class label
         epoch_size=dt.get("epoch_size", None),
         num_workers=4,
         shuffle=False,
     )
-    loader = rot_loader(epoch=0)  # <-- this is iterable
+    loader = rot_loader(epoch=0)
 
     # 4) instantiate algorithm + load checkpoint
     import algorithms as alg
@@ -411,7 +438,6 @@ if __name__ == "__main__":
     if use_cuda:
         algo.load_to_gpu()
 
-    # algo.load_checkpoint(epoch) should load experiments/<exp>/model_net_epochXX internally
     algo.load_checkpoint(args.checkpoint, train=False)
 
     feat_extractor = algo.networks.get(
@@ -446,7 +472,6 @@ if __name__ == "__main__":
             max_points=args.max_points,
         )
 
-    # standardize (recommended)
     X = X.astype(np.float32)
     if args.standardize:
         X = (X - X.mean(axis=0, keepdims=True)) / (X.std(axis=0, keepdims=True) + 1e-5)
@@ -464,7 +489,6 @@ if __name__ == "__main__":
         print("WARNING: umap-learn not installed; skipping UMAP plots. Install with: pip install umap-learn")
 
     # 7) save plots
-    # Put plots under results/<exp>... but sanitize slashes so it doesn't nest forever
     exp_tag = args.exp.replace("/", "__")
     save_dir = Path("results") / f"{exp_tag}_{type(model).__name__}" / f"bs{batch_size}"
     plots_dir = save_dir / "plots"
