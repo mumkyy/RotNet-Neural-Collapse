@@ -14,7 +14,7 @@ Checkpoints (two common patterns):
 A) experiments/<exp>/model_net_epochXX            (nested to match config exp)
 B) experiments/<folder_name>/model_net_epochXX    (flat folder name)
 
-✅ Recommended: pass --exp_dir to explicitly point to the checkpoint folder
+Recommended: pass --exp_dir to explicitly point to the checkpoint folder
 (e.g. experiments/CIFAR10_Jigsaw_NIN4blocks_...).
 
 Also supports your custom dataloader.py:
