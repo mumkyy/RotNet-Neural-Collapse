@@ -128,7 +128,10 @@ class ClassificationModel(Algorithm):
                 diff = means - mu.unsqueeze(0)                                          # (C,D)
                 trace_Sb = (counts.unsqueeze(1) * (diff ** 2)).sum() / float(B)         # scalar
 
-                nc1 = trace_Sw / (trace_Sb + eps)
+                if self.opt['nc_reg'].get('detach_sb', False):
+                    nc1 = trace_Sw / (trace_Sb.detach() + eps)
+                else:
+                    nc1 = trace_Sw / (trace_Sb + eps)
                 penalty = -torch.log(nc1 + eps)
 
                 w = self.opt['nc_reg']['weights'][layer]
