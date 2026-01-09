@@ -1,46 +1,42 @@
-from __future__ import print_function
 import argparse
 import os
 import importlib.util
+import sys
 
-from train import train_loop as alg
-from dataloader import DataLoader, GenericDataset
+# Ensure architectures can be imported
+sys.path.append(os.getcwd())
+
+from architectures.train import train_loop
 
 def parse_args(): 
-    p = argparse.ArgumentParser(
-        "Main will initialize the training loop"
-    )
-    p.add_argument(
-        '--exp', required=True,
-        help = 'config file with path'
-    )
-    p.add_argument(
-        '--no_cuda', default=False, 
-        help = 'disable cuda'
-    )
+    p = argparse.ArgumentParser(description="Main will initialize the training loop")
+    p.add_argument('--exp', required=True, help='config file path (e.g., config/speechCommands/reverse/MSE/...)')
     return p.parse_args()
 
 def main(): 
     args = parse_args()
-    cfg_file = 'config/' + args.exp + '.py'
-    exp_dir = os.path.join('.','experiment',args.exp)
+    
+    # Construct python module path
+    # Assuming user passes: config/speechCommands/reverse/MSE/.../config_file
+    cfg_path = args.exp
+    if not cfg_path.endswith('.py'):
+        cfg_path += '.py'
+        
+    if not os.path.exists(cfg_path):
+        raise FileNotFoundError(f"Config file not found: {cfg_path}")
 
-    spec = importlib.util.spec_from_file_location(cfg_file)
+    # Dynamic Config Loading
+    spec = importlib.util.spec_from_file_location("config_module", cfg_path)
     config_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config_module)
+    
     config = config_module.config 
-
-    if config['exp_dir']: 
-        exp_dir =  config['exp_dir']   
     
+    print(f"Launching experiment: {cfg_path}")
+    print(f"Model Stages: {config['networks']['model']['opt']['num_stages']}")
+    print(f"Loss Function: {config['criterions']['loss']['ctype']}")
 
-    print(f"launching experimen {args.exp}")
-
-    data_train_opt = config[data_train_opt] 
-    data_test_opt = config[data_test_opt]
-
-    num_classes = config[num_classes]
-    
+    train_loop(config)
 
 if __name__ == '__main__': 
     main()

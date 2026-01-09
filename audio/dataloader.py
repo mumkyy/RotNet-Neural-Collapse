@@ -1,48 +1,77 @@
-
-import torchaudio
 import torch
-import math
-from torchaudio.datasets import SPEECHCOMMANDS
-
+import torchaudio
 import random
-import numpy as np 
-import pandas as pd 
-import matplotlib.pyplot as plt
+import numpy as np
+from torch.utils.data import Dataset, DataLoader
 
-from pathlib import Path
+class AudioTransforms:
+    """Converts 1D waveform to 2D Mel Spectrogram (Image-like)"""
+    def __init__(self, sample_rate=16000):
+        self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(
+            sample_rate=sample_rate,
+            n_mels=64,       # Height of the 'image'
+            n_fft=1024,
+            hop_length=512
+        )
+        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB()
 
-_SPEECH_DATASET_DIR = './datasets/SpeechCommands_dataset'
+    def __call__(self, waveform):
+        # transform to spectogram
+        spec = self.mel_spectrogram(waveform)
+        spec = self.amplitude_to_db(spec)
+        return spec
 
-dataset = torchaudio.datasets.SPEECHCOMMANDS(root=str(_SPEECH_DATASET_DIR), download=True)
+class GenericDataset(Dataset):
+    def __init__(self, opt):
+        self.root_dir = './datasets/SpeechCommands_dataset'
+        self.dataset_name = opt.get('dataset_name', 'SPEECHCOMMANDS')
+        self.split = opt.get('split', 'train')
+        self.pretext_mode = opt.get('pretext_mode', 'reverse')
+        self.unsupervised = opt.get('unsupervised', False)
+        
+        # Load the backend dataset (Train or Test split)
+        self.dataset = torchaudio.datasets.SPEECHCOMMANDS(
+            root=self.root_dir, 
+            download=True, 
+            subset='training' if self.split == 'train' else 'testing'
+        )
+        
+        self.transforms = AudioTransforms()
 
+    def __len__(self):
+        return len(self.dataset)
 
-def reverse_sample(waveform):
+    def __getitem__(self, idx):
+        waveform, sample_rate, label, speaker_id, utterance_number = self.dataset[idx]
+        
+        # --- Pretext Task Logic ---
+        target_label = 0 # Class 0: Original
+        
+        if self.unsupervised and self.pretext_mode == 'reverse':
+            # 50% chance to flip the audio
+            if random.random() > 0.5:
+                waveform = torch.flip(waveform, dims=[1])
+                target_label = 1 # Class 1: Reversed
 
-    reversed_waveform = torch.flip(waveform, dims=[1])
-    return reversed_waveform
+        # --- 1D to 2D Conversion ---
+        # Input: (1, Time) -> Output: (1, Freq, Time)
+        spec = self.transforms(waveform)
+        
+        # Ensure single channel (grayscale-like)
+        if spec.shape[0] > 1:
+            spec = spec.mean(dim=0, keepdim=True)
+            
+        # Pad to ensuring consistent size if necessary, or crop
+        # For this example, we assume roughly consistent 1-sec clips
+        
+        return spec, target_label
 
-class Dataloader(object): 
-    def __init__(self, dataset, batch_size=1, unsupervised=True, epoch_size=None, num_workers=0, shuffle=True):
-        self.dataset = dataset
-        self.shuffle = shuffle
-        self.epoch_size = epoch_size if epoch_size is not None else len(dataset)
-        self.batch_size = batch_size
-        self.unsupervised = unsupervised
-        self.num_workers = num_workers
-
-        self.pretext_mode = getattr(self.dataset, 'pretext_mode', 'reverse')
-    def get_iterator(self, epoch=0):
-        rand_seed = epoch*self.epoch_size
-        random.seed(rand_seed)
-        if self.unsupervised:
-            def _load_function(idx): 
-                idx = idx % len(self.dataset)
-                waveform, sample_rate, label, speaker_id, utterance_number = self.dataset[idx]
-                mode = getattr(self.dataset, 'pretex_mode', self.pretext_mode)
-                if mode == 'reverse': 
-                    r = random.randint(0,1)
-                    rev = True if r == 1 else False
-                    if rev : 
-                        return  r, reverse_sample(waveform = waveform)
-                    else : 
-                        return r, waveform
+def create_dataloader(opt):
+    dataset = GenericDataset(opt)
+    return DataLoader(
+        dataset,
+        batch_size=opt['batch_size'],
+        shuffle=(opt['split'] == 'train'),
+        num_workers=opt.get('num_workers', 2),
+        drop_last=True
+    )
