@@ -132,7 +132,11 @@ class ClassificationModel(Algorithm):
                     nc1 = trace_Sw / (trace_Sb.detach() + eps)
                 else:
                     nc1 = trace_Sw / (trace_Sb + eps)
-                penalty = -torch.log(nc1 + eps)
+
+                if self.opt['nc_reg'].get('inverse',False):
+                    penalty = 1.0 / (nc1 + eps)
+                else:
+                    penalty = -torch.log(nc1 + eps)
 
                 w = self.opt['nc_reg']['weights'][layer]
                 loss_total = loss_total + w * penalty
