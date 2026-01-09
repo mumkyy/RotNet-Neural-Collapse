@@ -27,7 +27,7 @@ config['max_num_epochs'] = 200
 net_opt = {}
 net_opt['num_classes'] = 2
 net_opt['num_stages']  = 4
-net_opt['use_avg_on_conv3'] = True
+net_opt['use_avg_on_conv3'] = False
 
 networks = {}
 net_optim_params = {'optim_type': 'sgd',
