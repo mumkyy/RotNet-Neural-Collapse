@@ -34,7 +34,7 @@ config['networks'] = networks
 
 config['nc_reg'] = {
     'layers': ['classifier','conv4','conv3','conv2','conv1'],  # which layers to regularize
-    'weights': {'classifier': 0.001, 'conv4':0.001,'conv3':0.001, 'conv2': 0.001, 'conv1': 0.001},
+    'weights': {'classifier': 0.01, 'conv4':0.01,'conv3':0.001, 'conv2': 0.001, 'conv1': 0.001},
     'detach_sb': True,
 }
 
