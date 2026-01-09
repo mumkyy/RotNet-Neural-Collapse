@@ -93,28 +93,37 @@ class audioCNN(nn.Module):
             
         return out_feat_keys
     
-    def forward(self, x, out_feat_keys=None): 
+    def forward(self, x, out_feat_keys=None):
         out_feat_keys = self._parse_out_keys_arg(out_feat_keys)
         out_index = {key: i for i, key in enumerate(out_feat_keys)}
         out_feats = [None] * len(out_feat_keys)
 
         feat = x
-        num_stages = len(self._feature_blocks) - 1
+        num_stages = len(self._feature_blocks) - 1  # last block is classifier head
 
-        for s in range(num_stages): 
-            for child_name, child in self._feature_blocks[s].named_children(): 
+        # conv feature blocks
+        for s in range(num_stages):
+            for child_name, child in self._feature_blocks[s].named_children():
                 feat = child(feat)
                 key = f'conv{s+1}.{child_name}'
                 idx = out_index.get(key)
-                if idx is not None: 
+                if idx is not None:
                     out_feats[idx] = feat
+
             key = f'conv{s+1}'
             idx = out_index.get(key)
-            if idx is not None: 
-                out_feats[idx] = feat 
+            if idx is not None:
+                out_feats[idx] = feat
+
+        # classifier head (GAP + Linear)
+        logits = self._feature_blocks[-1](feat)
+        idx = out_index.get('classifier')
+        if idx is not None:
+            out_feats[idx] = logits
 
         return out_feats[0] if len(out_feats) == 1 else out_feats
-        
+
+            
     def weight_initialization(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
