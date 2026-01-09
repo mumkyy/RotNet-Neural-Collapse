@@ -43,8 +43,12 @@ def get_nc1_data(data_dict):
     """
     if 'nc1_by_layer' in data_dict:
         layers_dict = data_dict['nc1_by_layer']
+        keys = list(layers_dict.keys())
+
+        if 'classifier' in keys:
+            keys.remove('classifier')
         # Get the last key (e.g., 'conv4' or 'layer4')
-        last_layer = list(layers_dict.keys())[-1]
+        last_layer = keys[-1]
         print(f"[info] Using layer '{last_layer}' for NC1 comparison.")
         return layers_dict[last_layer]
     elif 'trSwtrSb' in data_dict:
