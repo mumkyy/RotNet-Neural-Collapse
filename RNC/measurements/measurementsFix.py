@@ -228,7 +228,10 @@ def compute_epoch_metrics_multilayer(
     correct = 0
     totalN = 0
 
-    out_keys = layer_keys + ["classifier"]  # logits at "classifier"
+    out_keys = list(layer_keys)
+    if "classifier" not in out_keys:
+        out_keys.append("classifier") # logits at "classifier"
+
 
     # FIX: Call loader(0) to get the iterator
     iter_pass1 = loader(0)
@@ -239,8 +242,8 @@ def compute_epoch_metrics_multilayer(
 
         outs = model(x, out_feat_keys=out_keys)
         # outs is list aligned with out_keys
-        feats = outs[:-1]
-        logits = outs[-1]
+        logits = outs[out_keys.index("classifier")]
+        feats = outs if "classifier" in layer_keys else outs[:-1]
 
         if "h" not in penult:
             raise RuntimeError("Penultimate pre-hook didn't fire.")
