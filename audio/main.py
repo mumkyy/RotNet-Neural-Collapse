@@ -1,46 +1,54 @@
-from __future__ import print_function
+# main.py
 import argparse
-import os
 import importlib.util
+import os
+import sys
+from pathlib import Path
 
-from train import train_loop as alg
-from dataloader import DataLoader, GenericDataset
+# Ensure repo root is importable (so "architectures.*" works when running from root)
+REPO_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO_ROOT))
 
-def parse_args(): 
-    p = argparse.ArgumentParser(
-        "Main will initialize the training loop"
-    )
+from architectures.train import train_loop
+
+
+def _load_config(cfg_path: str):
+    cfg_path = Path(cfg_path)
+    if cfg_path.suffix != ".py":
+        cfg_path = cfg_path.with_suffix(".py")
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"Config file not found: {cfg_path}")
+
+    spec = importlib.util.spec_from_file_location("config_module", str(cfg_path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore
+    if not hasattr(module, "config"):
+        raise AttributeError(f"Config file {cfg_path} must define a top-level variable named `config`.")
+    return module.config, str(cfg_path)
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Run audio pretext training from a config file.")
     p.add_argument(
-        '--exp', required=True,
-        help = 'config file with path'
+        "--exp",
+        required=True,
+        help="Path to config .py (e.g. config/speechCommands/reverse/MSE/.../SPEECHCOMMANDS_Reverse_NINAudio_TwoClass.py)",
     )
-    p.add_argument(
-        '--no_cuda', default=False, 
-        help = 'disable cuda'
-    )
+    p.add_argument("--no_cuda", action="store_true", help="Force CPU even if CUDA is available.")
     return p.parse_args()
 
-def main(): 
+
+def main():
     args = parse_args()
-    cfg_file = 'config/' + args.exp + '.py'
-    exp_dir = os.path.join('.','experiment',args.exp)
+    config, cfg_path = _load_config(args.exp)
 
-    spec = importlib.util.spec_from_file_location(cfg_file)
-    config_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config_module)
-    config = config_module.config 
+    print(f"Launching experiment: {cfg_path}")
+    print(f"Max epochs: {config.get('max_num_epochs')}")
+    print(f"Model file: {config['networks']['model']['def_file']}")
+    print(f"Loss: {config['criterions']['loss']['ctype']}")
 
-    if config['exp_dir']: 
-        exp_dir =  config['exp_dir']   
-    
+    train_loop(config, no_cuda=args.no_cuda)
 
-    print(f"launching experimen {args.exp}")
 
-    data_train_opt = config[data_train_opt] 
-    data_test_opt = config[data_test_opt]
-
-    num_classes = config[num_classes]
-    
-
-if __name__ == '__main__': 
+if __name__ == "__main__":
     main()
