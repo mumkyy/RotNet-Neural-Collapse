@@ -33,8 +33,8 @@ networks['model'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretraine
 config['networks'] = networks
 
 config['nc_reg'] = {
-    'layers': ['conv4','conv3','conv2','conv1'],  # which layers to regularize
-    'weights': {'conv4':0.001,'conv3':0.001, 'conv2': 0.001, 'conv1': 0.001},
+    'layers': ['classifier','conv4','conv3','conv2','conv1'],  # which layers to regularize
+    'weights': {'classifier': 0.001, 'conv4':0.001,'conv3':0.001, 'conv2': 0.001, 'conv1': 0.001},
     'detach_sb': True,
 }
 
