@@ -69,11 +69,13 @@ def get_nc1_by_layer_at(data_dict, epoch_idx):
             out[k] = series[epoch_idx]
     return out
 
+#log scale
 def plot_nc1_by_layer(out_dir, layers, vals_a, vals_b, label_a, label_b, epoch):
     plt.figure(figsize=(10, 5))
     x = list(range(len(layers)))
-    plt.plot(x, vals_a, 'bx-', label=label_a)
-    plt.plot(x, vals_b, 'ro-', label=label_b)
+    
+    plt.semilogy(x, vals_a, 'bx-', label=label_a)
+    plt.semilogy(x, vals_b, 'ro-', label=label_b)
     plt.xticks(x, layers, rotation=45, ha='right')
     plt.xlabel('Layer')
     plt.ylabel('NC1')
