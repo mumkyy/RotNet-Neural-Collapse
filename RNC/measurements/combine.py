@@ -185,6 +185,106 @@ def plot_nc4_triple(out_dir: Path, common_epochs, dataA, dataB, idxA, idxB, labe
     plt.close()
 
 
+# ==================== NEW: NC4 layerwise plotting ====================
+
+def plot_nc4_layerwise(out_dir: Path, common_epochs, dataA, dataB, idxA, idxB, label_a, label_b):
+    """
+    If nc4_layerwise exists in both runs, plot *one* comparison figure:
+      - per-layer match over epochs
+      - per-layer ncc_acc over epochs
+
+    Expected structure in metrics.pkl:
+      data['nc4_layerwise'] = {
+         layer_key: {'match':[...], 'mismatch':[...], 'ncc_acc':[...]}
+      }
+      and optionally data['layer_keys'] for ordering.
+    """
+    if 'nc4_layerwise' not in dataA or 'nc4_layerwise' not in dataB:
+        print("[info] NC4 layerwise not present in both runs; skipping layerwise NC4 plot.")
+        return
+
+    lwA = dataA['nc4_layerwise']
+    lwB = dataB['nc4_layerwise']
+
+    # Decide layer order
+    layer_order = None
+    if isinstance(dataA.get('layer_keys', None), list) and dataA['layer_keys']:
+        layer_order = [k for k in dataA['layer_keys'] if k in lwA and k in lwB]
+    if not layer_order:
+        layer_order = sorted(set(lwA.keys()).intersection(lwB.keys()))
+
+    if not layer_order:
+        print("[warning] No overlapping layers found in nc4_layerwise; skipping.")
+        return
+
+    # Validate expected subkeys
+    for k in layer_order:
+        if not isinstance(lwA.get(k, None), dict) or not isinstance(lwB.get(k, None), dict):
+            print(f"[warning] Bad nc4_layerwise format for layer {k}; skipping.")
+            return
+        for sub in ('match', 'ncc_acc'):
+            if sub not in lwA[k] or sub not in lwB[k]:
+                print(f"[warning] Missing '{sub}' in nc4_layerwise for layer {k}; skipping.")
+                return
+
+    # Plot: match curves per layer
+    plt.figure(figsize=(10, 6))
+    for k in layer_order:
+        yA = sel(lwA[k]['match'], idxA)
+        yB = sel(lwB[k]['match'], idxB)
+        plt.plot(common_epochs, yA, marker='o', linestyle='-', label=f"{label_a} {k}")
+        plt.plot(common_epochs, yB, marker='o', linestyle='--', label=f"{label_b} {k}")
+    plt.xlabel("Epoch")
+    plt.ylabel("NC4 layerwise match (net == NCC@layer)")
+    plt.title("NC4 layerwise match vs Epoch (per layer)")
+    plt.legend(frameon=False, ncol=2, fontsize=9)
+    plt.grid(True, ls='--', alpha=0.6)
+    plt.tight_layout()
+    plt.savefig(out_dir / "nc4_layerwise_match.pdf")
+    plt.close()
+
+    # Plot: ncc_acc curves per layer
+    plt.figure(figsize=(10, 6))
+    for k in layer_order:
+        yA = sel(lwA[k]['ncc_acc'], idxA)
+        yB = sel(lwB[k]['ncc_acc'], idxB)
+        plt.plot(common_epochs, yA, marker='o', linestyle='-', label=f"{label_a} {k}")
+        plt.plot(common_epochs, yB, marker='o', linestyle='--', label=f"{label_b} {k}")
+    plt.xlabel("Epoch")
+    plt.ylabel("Layerwise NCC accuracy")
+    plt.title("Layerwise NCC accuracy vs Epoch (per layer)")
+    plt.legend(frameon=False, ncol=2, fontsize=9)
+    plt.grid(True, ls='--', alpha=0.6)
+    plt.tight_layout()
+    plt.savefig(out_dir / "nc4_layerwise_ncc_acc.pdf")
+    plt.close()
+
+    # Final-epoch summary (match + ncc_acc across layers)
+    last_epoch = common_epochs[-1]
+    plt.figure(figsize=(10, 5))
+    x = list(range(len(layer_order)))
+
+    matchA = [lwA[k]['match'][idxA[-1]] for k in layer_order]
+    matchB = [lwB[k]['match'][idxB[-1]] for k in layer_order]
+    accA = [lwA[k]['ncc_acc'][idxA[-1]] for k in layer_order]
+    accB = [lwB[k]['ncc_acc'][idxB[-1]] for k in layer_order]
+
+    plt.plot(x, matchA, 'bx-', label=f"{label_a} match")
+    plt.plot(x, matchB, 'ro-', label=f"{label_b} match")
+    plt.plot(x, accA, 'b^-', label=f"{label_a} ncc_acc")
+    plt.plot(x, accB, 'r^-', label=f"{label_b} ncc_acc")
+
+    plt.xticks(x, layer_order, rotation=45, ha='right')
+    plt.xlabel("Layer")
+    plt.ylabel("Value")
+    plt.title(f"NC4 layerwise summary at epoch {last_epoch}")
+    plt.legend(frameon=False, ncol=2, fontsize=9)
+    plt.grid(True, ls='--', alpha=0.6)
+    plt.tight_layout()
+    plt.savefig(out_dir / "nc4_layerwise_final_compare.pdf")
+    plt.close()
+
+
 def main():
     args = parse_args()
 
@@ -301,6 +401,9 @@ def main():
 
     # 7) NC4 plots (if present)
     plot_nc4_triple(out_dir, common, dataA, dataB, idxA, idxB, args.label_a, args.label_b)
+
+    # 8) NEW: NC4 layerwise plots (if present)
+    plot_nc4_layerwise(out_dir, common, dataA, dataB, idxA, idxB, args.label_a, args.label_b)
 
     print("✓ Done – results in", out_dir)
 
