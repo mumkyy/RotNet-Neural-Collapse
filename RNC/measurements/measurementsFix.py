@@ -5,7 +5,7 @@ import argparse
 import importlib.util
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -181,21 +181,100 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
+def nc4Fun(
+    model: nn.Module,
+    loader,  # DataLoader callable: loader(epoch) -> iterator
+    means_penult: List[torch.Tensor],
+    num_classes: int,
+    device: torch.device,
+) -> Tuple[float, float, float]:
+    """
+    Returns: (nc4_match, nc4_mismatch, ncc_acc)
+      nc4_match    = P(net_pred == ncc_pred)
+      nc4_mismatch = 1 - nc4_match
+      ncc_acc      = P(ncc_pred == y)
+    """
+    model.eval().to(device)
+
+    # (C, D) on device
+    Mu = torch.stack([m.to(device) for m in means_penult], dim=0)
+
+    # final classifier prehook to grab penultimate h
+    if not hasattr(model, "_feature_blocks"):
+        raise RuntimeError("Expected model._feature_blocks (NetworkInNetwork).")
+    cls_layer = model._feature_blocks[-1].Classifier
+
+    penult: Dict[str, torch.Tensor] = {}
+
+    def prehook(_m, inputs):
+        penult["h"] = inputs[0].detach()
+
+    handle = cls_layer.register_forward_pre_hook(prehook)
+
+    total = 0
+    match_ct = 0
+    ncc_correct = 0
+
+    it = loader(0)
+    for x, y in tqdm(it, desc="NC4 (NCC match/acc)", unit="batch", leave=False):
+        x = x.to(device)
+        y = y.to(device)
+
+        # Ensure we get logits in a consistent way
+        out = model(x, out_feat_keys=["classifier"])
+        logits = out[0] if isinstance(out, (list, tuple)) else out
+
+        if "h" not in penult:
+            raise RuntimeError("NC4 prehook didn't fire; penultimate not captured.")
+
+        H = gapify(penult["h"])  # (B, D)
+
+        # squared distances: (B, C)
+        H2 = (H * H).sum(dim=1, keepdim=True)          # (B, 1)
+        Mu2 = (Mu * Mu).sum(dim=1).view(1, -1)         # (1, C)
+        dist2 = H2 - 2.0 * (H @ Mu.t()) + Mu2          # (B, C)
+
+        ncc_pred = dist2.argmin(dim=1)                 # (B,)
+        net_pred = logits.argmax(dim=1)                # (B,)
+
+        total += y.numel()
+        match_ct += (net_pred == ncc_pred).sum().item()
+        ncc_correct += (ncc_pred == y).sum().item()
+
+    handle.remove()
+
+    if total == 0:
+        raise RuntimeError("NC4 saw 0 samples.")
+
+    nc4_match = match_ct / float(total)
+    nc4_mismatch = 1.0 - nc4_match
+    ncc_acc = ncc_correct / float(total)
+
+    return nc4_match, nc4_mismatch, ncc_acc
+
+
+@torch.no_grad()
 def compute_epoch_metrics_multilayer(
     model: nn.Module,
-    loader, # This is the DataLoader object (callable)
+    loader,  # This is the DataLoader object (callable)
     num_classes: int,
     layer_keys: List[str],
     device: torch.device,
-) -> Tuple[Dict[str, float], float, float, float]:
+    return_means_penult: bool = False,
+) -> Union[
+    Tuple[Dict[str, float], float, float, float],
+    Tuple[Dict[str, float], float, float, float, List[torch.Tensor]]
+]:
     """
     Returns:
       nc1_by_layer: dict layer_key -> NC1
       acc: accuracy
       loss: CE loss
       nc3: NC3 computed at classifier feature space (penultimate input to Linear)
-    """
 
+    If return_means_penult=True:
+      also returns means_penult: List[Tensor] of length C, each (D,)
+    """
     model.eval().to(device)
     loss_fn = nn.CrossEntropyLoss()
 
@@ -230,8 +309,7 @@ def compute_epoch_metrics_multilayer(
 
     out_keys = list(layer_keys)
     if "classifier" not in out_keys:
-        out_keys.append("classifier") # logits at "classifier"
-
+        out_keys.append("classifier")  # logits at "classifier"
 
     # FIX: Call loader(0) to get the iterator
     iter_pass1 = loader(0)
@@ -359,6 +437,8 @@ def compute_epoch_metrics_multilayer(
     handle.remove()
     penult.clear()
 
+    if return_means_penult:
+        return nc1_by_layer, acc, loss, nc3, means_penult
     return nc1_by_layer, acc, loss, nc3
 
 
@@ -376,6 +456,7 @@ def plot_and_save(save_dir: Path, epochs: List[int], series: Dict[str, List[floa
         plt.savefig(save_dir / "plots" / f"{name}.pdf")
         plt.close()
 
+
 def plot_nc1_layers(save_dir: Path, epochs: List[int], nc1_curves: Dict[str, List[float]], title: str) -> None:
     (save_dir / "plots").mkdir(parents=True, exist_ok=True)
     plt.figure()
@@ -389,6 +470,7 @@ def plot_nc1_layers(save_dir: Path, epochs: List[int], nc1_curves: Dict[str, Lis
     plt.savefig(save_dir / "plots" / "nc1_layers.pdf")
     plt.close()
 
+
 def plot_nc1_by_layer(save_dir: Path, layer_keys: List[str], nc1_vals: List[float], title: str) -> None:
     (save_dir / "plots").mkdir(parents=True, exist_ok=True)
     plt.figure()
@@ -400,6 +482,21 @@ def plot_nc1_by_layer(save_dir: Path, layer_keys: List[str], nc1_vals: List[floa
     plt.title(title)
     plt.tight_layout()
     plt.savefig(save_dir / "plots" / "nc1_layers_final.pdf")
+    plt.close()
+
+
+def plot_nc4(save_dir: Path, epochs: List[int], match: List[float], mismatch: List[float], ncc_acc: List[float]) -> None:
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+    plt.figure()
+    plt.plot(epochs, match, marker="o", label="nc4_match")
+    plt.plot(epochs, mismatch, marker="o", label="nc4_mismatch")
+    plt.plot(epochs, ncc_acc, marker="o", label="ncc_acc")
+    plt.xlabel("epoch")
+    plt.ylabel("value")
+    plt.title("NC4 / NCC metrics vs epoch")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / "nc4Plot.pdf")
     plt.close()
 
 
@@ -438,8 +535,15 @@ def parse_args():
     p.add_argument("--color-dist-strength", type=float, default=1.0)
 
     # layers to compute NC1 on (use exposed keys like conv1,conv2,conv3,...)
-    p.add_argument("--layers", type=str, default="conv1,conv2,conv3,conv4",
-                   help="Comma list of exposed feature keys for NC1 (e.g. conv1,conv2,conv3,conv4)")
+    p.add_argument(
+        "--layers",
+        type=str,
+        default="conv1,conv2,conv3,conv4",
+        help="Comma list of exposed feature keys for NC1 (e.g. conv1,conv2,conv3,conv4)",
+    )
+
+    # NC4 flag
+    p.add_argument("--nc4", action="store_true", help="Compute NC4 (NCC Agreement / accuracy) and plot it")
 
     # misc
     p.add_argument("--no-cuda", action="store_true")
@@ -457,26 +561,25 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     config = load_config(args.config_root, args.exp)
-    
+
     # ---------------------------------------------------------
-    # 1. SETUP & MODEL LOADING (Moved UP)
+    # 1. SETUP & MODEL LOADING
     # ---------------------------------------------------------
     exp_dir = Path(args.exp_dir)
     if not exp_dir.is_dir():
         raise FileNotFoundError(f"exp-dir not found: {exp_dir}")
 
-    # Model
     model = build_fresh_model(
         config=config,
         net_key=args.net_key,
         arch_class=args.arch_class,
         use_cuda=use_cuda,
     )
-    
+
     # Load the checkpoint we want to measure (or the last one found)
     epoch_to_path = discover_checkpoints(exp_dir, args.ckpt_glob)
     all_epochs = sorted(epoch_to_path.keys())
-    
+
     # Determine epochs to process
     if args.checkpoint is not None:
         epochs = [args.checkpoint]
@@ -497,37 +600,33 @@ def main():
     # ---------------------------------------------------------
     # 2. AUTO-DISCOVER PERMUTATIONS
     # ---------------------------------------------------------
-    
-    # Re-implementing the core of maxHamming deterministically
-    # There are 4! = 24 possible starting permutations.
-    # We will try all 24 sets.
-    
-    K = 4 # 2x2 grid
+    K = 4  # 2x2 grid
     N = args.num_classes
-    all_base_perms = list(permutations(range(1, K+1))) # 1-based logic from your file
-    
+    all_base_perms = list(permutations(range(1, K + 1)))  # 1-based logic from your file
+
     sigmas = parse_float_list(args.sigmas)
     kernel_sizes = parse_int_list(args.kernel_sizes)
-    if args.pretext_mode == "gaussian_noise" and sigmas is None: sigmas = [1e-3, 1e-2, 1e-1, 1.0]
-    if args.pretext_mode == "gaussian_blur" and kernel_sizes is None: kernel_sizes = [3, 5, 7, 9]
+    if args.pretext_mode == "gaussian_noise" and sigmas is None:
+        sigmas = [1e-3, 1e-2, 1e-1, 1.0]
+    if args.pretext_mode == "gaussian_blur" and kernel_sizes is None:
+        kernel_sizes = [3, 5, 7, 9]
 
     best_perms = None
     best_acc = -1.0
-    
+
     print(f"[Calibration] Testing 24 possible permutation sets...")
-    
-    # Function to generate set starting at index start_idx
-    def get_set_starting_at(start_idx):
+
+    def get_set_starting_at(start_idx: int) -> List[Tuple[int, ...]]:
         # EXACT logic from your maxHamming.py, but j is forced
         P_bar = all_base_perms.copy()
-        P = []
-        j = start_idx # Forced start
-        
+        P: List[Tuple[int, int, int, int]] = []
+        j = start_idx  # Forced start
+
         i = 1
         while i <= N:
             P.append(P_bar[j])
-            P_prime = P_bar[:j] + P_bar[j+1:]
-            
+            P_prime = P_bar[:j] + P_bar[j + 1 :]
+
             if i < N:
                 # Calculate Dist Matrix D
                 # D[x,y] = hamming(P[x], P_prime[y])
@@ -536,61 +635,60 @@ def main():
                 D = np.zeros((n_p, n_pp), dtype=int)
                 for r in range(n_p):
                     for c in range(n_pp):
-                        D[r,c] = np.sum(np.array(P[r]) != np.array(P_prime[c]))
-                
+                        D[r, c] = int(np.sum(np.array(P[r]) != np.array(P_prime[c])))
+
                 D_bar = np.min(D, axis=0)
-                j = np.argmax(D_bar)
-            
+                j = int(np.argmax(D_bar))
+
             P_bar = P_prime
             i += 1
-        return [tuple(x-1 for x in p) for p in P] # Convert to 0-based for loader
 
-    # Search loop
+        # Convert to 0-based for loader
+        return [tuple(x - 1 for x in p) for p in P]
+
     for start_idx in range(len(all_base_perms)):
         candidate_perms = get_set_starting_at(start_idx)
-        
-        # Build quick loader (returns DataLoader callable object)
+
         calib_loader = build_cifar10_pretext_loader(
-            split='test', batch_size=128, workers=0, # fast, no MP overhead
+            split="test",
+            batch_size=128,
+            workers=0,  # fast, no MP overhead
             pretext_mode=args.pretext_mode,
-            sigmas=sigmas, kernel_sizes=kernel_sizes,
+            sigmas=sigmas,
+            kernel_sizes=kernel_sizes,
             patch_jitter=args.patch_jitter,
-            color_distort=False, color_dist_strength=0.0,
-            shuffle=False, fixed_perms=candidate_perms
+            color_distort=False,
+            color_dist_strength=0.0,
+            shuffle=False,
+            fixed_perms=candidate_perms,
         )
-        
-        # Run 1 batch (FIXED: calling loader(0) to get iterator)
+
         x, y = next(iter(calib_loader(0)))
         x, y = x.to(device), y.to(device)
         with torch.no_grad():
             out_raw = model(x)
-            # FIX: Check if output is list/tuple or direct tensor
-            if isinstance(out_raw, (list, tuple)):
-                logits = out_raw[-1]
-            else:
-                logits = out_raw
-            
+            logits = out_raw[-1] if isinstance(out_raw, (list, tuple)) else out_raw
             acc = (logits.argmax(1) == y).float().mean().item()
-            
+
         if acc > best_acc:
             best_acc = acc
             best_perms = candidate_perms
-        
-        # Optimization: If we hit >90%, we found it.
+
         if best_acc > 0.90:
             print(f"[Calibration] Found match at index {start_idx}! Acc: {best_acc:.2%}")
             break
-            
+
     if best_acc < 0.5:
         print(f"\n[WARNING] Best match was only {best_acc:.2%}. Something else might be wrong (e.g. Patch Jitter mismatch).")
     else:
         print(f"[Calibration] Locked in permutation set. Best Acc: {best_acc:.2%}")
 
+    if best_perms is None:
+        raise RuntimeError("Calibration failed to determine best_perms (unexpected).")
+
     # ---------------------------------------------------------
     # 3. MAIN METRICS LOOP
     # ---------------------------------------------------------
-    
-    # Create the REAL loader with the found perms
     loader = build_cifar10_pretext_loader(
         split=args.split,
         batch_size=args.batch_size,
@@ -602,7 +700,7 @@ def main():
         color_distort=args.color_distort,
         color_dist_strength=args.color_dist_strength,
         shuffle=False,
-        fixed_perms=best_perms 
+        fixed_perms=best_perms,
     )
 
     # validate layer keys exist
@@ -624,6 +722,11 @@ def main():
     nc3_curve: List[float] = []
     nc1_curves: Dict[str, List[float]] = {k: [] for k in layer_keys}
 
+    # NC4 storage
+    nc4_match_curve: List[float] = []
+    nc4_mismatch_curve: List[float] = []
+    ncc_acc_curve: List[float] = []
+
     for ep in epochs:
         ckpt = epoch_to_path[ep]
         print(f"\n[SimpleNIN] epoch {ep} -> {ckpt.name}")
@@ -631,13 +734,35 @@ def main():
         load_state_dict(model, ckpt)
         model.to(device)
 
-        nc1_by_layer, acc, loss, nc3 = compute_epoch_metrics_multilayer(
-            model=model,
-            loader=loader,
-            num_classes=args.num_classes,
-            layer_keys=layer_keys,
-            device=device,
-        )
+        if args.nc4:
+            nc1_by_layer, acc, loss, nc3, means_penult = compute_epoch_metrics_multilayer(
+                model=model,
+                loader=loader,
+                num_classes=args.num_classes,
+                layer_keys=layer_keys,
+                device=device,
+                return_means_penult=True,
+            )
+            nc4_match, nc4_mismatch, ncc_acc = nc4Fun(
+                model=model,
+                loader=loader,
+                means_penult=means_penult,
+                num_classes=args.num_classes,
+                device=device,
+            )
+            nc4_match_curve.append(nc4_match)
+            nc4_mismatch_curve.append(nc4_mismatch)
+            ncc_acc_curve.append(ncc_acc)
+
+            print(f"[SimpleNIN] nc4_match={nc4_match:.4f} nc4_mismatch={nc4_mismatch:.4f} ncc_acc={ncc_acc:.4f}")
+        else:
+            nc1_by_layer, acc, loss, nc3 = compute_epoch_metrics_multilayer(
+                model=model,
+                loader=loader,
+                num_classes=args.num_classes,
+                layer_keys=layer_keys,
+                device=device,
+            )
 
         epochs_logged.append(ep)
         acc_curve.append(acc)
@@ -663,6 +788,11 @@ def main():
         "layer_keys": layer_keys,
         "args": vars(args),
     }
+    if args.nc4:
+        payload["nc4_match"] = nc4_match_curve
+        payload["nc4_mismatch"] = nc4_mismatch_curve
+        payload["ncc_acc"] = ncc_acc_curve
+
     with open(out_dir / "metrics.pkl", "wb") as f:
         pickle.dump(payload, f)
 
@@ -673,9 +803,17 @@ def main():
         last_epoch = epochs_logged[-1]
         last_vals = [nc1_curves[k][-1] for k in layer_keys]
         plot_nc1_by_layer(out_dir, layer_keys, last_vals, f"NC1 across layers at epoch {last_epoch}")
-    
+
+    if args.nc4:
+        # single combined plot named nc4Plot.pdf
+        plot_nc4(out_dir, epochs_logged, nc4_match_curve, nc4_mismatch_curve, ncc_acc_curve)
+        # also optional per-metric PDFs if you want them (uncomment):
+        # plot_and_save(out_dir, epochs_logged,
+        #               {"nc4_match": nc4_match_curve, "nc4_mismatch": nc4_mismatch_curve, "ncc_acc": ncc_acc_curve},
+        #               "SimpleNIN")
 
     print(f"\n✓ Done. Results in: {out_dir}")
+
 
 if __name__ == "__main__":
     main()
