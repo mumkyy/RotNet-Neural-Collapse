@@ -4,7 +4,7 @@ config = {}
 
 data_train_opt = {}
 data_train_opt['batch_size']        = batch_size
-data_train_opt['dataset_name']      = 'CIFAR10'   
+data_train_opt['dataset_name']      = 'CIFAR10'    
 data_train_opt['dataset_root']   = 'data'
 data_train_opt['split']             = 'train'
 
@@ -21,13 +21,13 @@ config['max_num_epochs'] = 100
 
 networks = {}
 
-feat_pretrained_file = './checkpoints/CIFAR10/4_way/backbone/aug/CIFAR10_4_way_collapsed_backbone/200.pt'
+feat_pretrained_file = './checkpoints/CIFAR10/4_way/CE/backbone/aug/CIFAR10_4_way_collapsed_backbone_CE/200.pt'
 
 cls_net_opt = {
     'num_classes':   10,                     
     'backbone_ckpt': feat_pretrained_file,   
     'freeze_backbone': True,                 
-    'head_feat_key': 'conv6',                  
+    'head_feat_key': 'fc6',                  
     'input_size':    32,          
     "backbone_num_classes": 4,         
     "backbone_patch_dim": 14,           
