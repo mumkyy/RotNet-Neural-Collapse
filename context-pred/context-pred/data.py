@@ -228,7 +228,11 @@ class QuadContextPred(Dataset):
     return patch1, patch2, label
 
 
-def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=None,jitter=None):
+def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=None,jitter=None,dataset_name="Imagenette"):
+
+  name = str(dataset_name).lower()
+
+  is_cifar = name in {"cifar10", "cifar-10", "CIFAR10"}
 
   tf = [transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
 
@@ -241,29 +245,46 @@ def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=No
 
   tf = transforms.Compose(tf)
 
-  possible_dirs = [
-      os.path.join(root, "imagenette2-160"),
-      os.path.join(root, "imagenette2")  
-  ]
-
-  already_there = any(os.path.isdir(d) for d in possible_dirs)
-  download_flag = not already_there
-  
-  train_data = datasets.Imagenette(
-    root=root,
-    split="train",
-    download=download_flag,
-    transform=(tf if supervised else btf),    
-    size="160px"
-  )
-
-  val_data = datasets.Imagenette(
+  if is_cifar:
+    download_flag = not os.path.isdir(os.path.join(root, "cifar-10-batches-py"))
+    train_data = datasets.CIFAR10(
       root=root,
-      split="val",
+      train=True,
+     download=download_flag,
+      transform=(tf if supervised else btf),
+    )
+    val_data = datasets.CIFAR10(
+      root=root,
+      train=False,
       download=False,
       transform=(tf if supervised else btf),
+    )
+
+
+  else:
+    possible_dirs = [
+        os.path.join(root, "imagenette2-160"),
+        os.path.join(root, "imagenette2")  
+    ]
+
+    already_there = any(os.path.isdir(d) for d in possible_dirs)
+    download_flag = not already_there
+    
+    train_data = datasets.Imagenette(
+      root=root,
+      split="train",
+      download=download_flag,
+      transform=(tf if supervised else btf),    
       size="160px"
-  )
+    )
+
+    val_data = datasets.Imagenette(
+        root=root,
+        split="val",
+        download=False,
+        transform=(tf if supervised else btf),
+        size="160px"
+    )
 
   if mode == Modes.SUPERVISED:
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=num_workers)

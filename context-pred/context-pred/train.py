@@ -30,6 +30,7 @@ def main():
 
   train_opt = cfg["data_train_opt"]
   net_cfg   = cfg["networks"]["model"]
+  dataset_name = train_opt.get("dataset_name", "Imagenette")
 
   arch = net_cfg.get("arch", "AlexNetwork")
   is_pretext = (arch == "AlexNetwork")
@@ -119,6 +120,7 @@ def main():
     gap       = gap,
     chromatic = chromatic,
     jitter    = jitter,
+    dataset_name=dataset_name,
   )
 
   checkpoint_root = "checkpoints"
