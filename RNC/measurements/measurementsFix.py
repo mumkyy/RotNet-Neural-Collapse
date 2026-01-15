@@ -5,7 +5,7 @@ import argparse
 import importlib.util
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -181,21 +181,187 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
+def nc4Fun(
+    model: nn.Module,
+    loader,  # DataLoader callable: loader(epoch) -> iterator
+    means_penult: List[torch.Tensor],
+    num_classes: int,
+    device: torch.device,
+) -> Tuple[float, float, float]:
+    """
+    Returns: (nc4_match, nc4_mismatch, ncc_acc)
+      nc4_match    = P(net_pred == ncc_pred)
+      nc4_mismatch = 1 - nc4_match
+      ncc_acc      = P(ncc_pred == y)
+    """
+    model.eval().to(device)
+
+    # (C, D) on device
+    Mu = torch.stack([m.to(device) for m in means_penult], dim=0)
+
+    # final classifier prehook to grab penultimate h
+    if not hasattr(model, "_feature_blocks"):
+        raise RuntimeError("Expected model._feature_blocks (NetworkInNetwork).")
+    cls_layer = model._feature_blocks[-1].Classifier
+
+    penult: Dict[str, torch.Tensor] = {}
+
+    def prehook(_m, inputs):
+        penult["h"] = inputs[0].detach()
+
+    handle = cls_layer.register_forward_pre_hook(prehook)
+
+    total = 0
+    match_ct = 0
+    ncc_correct = 0
+
+    it = loader(0)
+    for x, y in tqdm(it, desc="NC4 (NCC match/acc)", unit="batch", leave=False):
+        x = x.to(device)
+        y = y.to(device)
+
+        # Ensure we get logits in a consistent way
+        out = model(x, out_feat_keys=["classifier"])
+        logits = out[0] if isinstance(out, (list, tuple)) else out
+
+        if "h" not in penult:
+            raise RuntimeError("NC4 prehook didn't fire; penultimate not captured.")
+
+        H = gapify(penult["h"])  # (B, D)
+
+        # squared distances: (B, C)
+        H2 = (H * H).sum(dim=1, keepdim=True)          # (B, 1)
+        Mu2 = (Mu * Mu).sum(dim=1).view(1, -1)         # (1, C)
+        dist2 = H2 - 2.0 * (H @ Mu.t()) + Mu2          # (B, C)
+
+        ncc_pred = dist2.argmin(dim=1)                 # (B,)
+        net_pred = logits.argmax(dim=1)                # (B,)
+
+        total += y.numel()
+        match_ct += (net_pred == ncc_pred).sum().item()
+        ncc_correct += (ncc_pred == y).sum().item()
+
+    handle.remove()
+
+    if total == 0:
+        raise RuntimeError("NC4 saw 0 samples.")
+
+    nc4_match = match_ct / float(total)
+    nc4_mismatch = 1.0 - nc4_match
+    ncc_acc = ncc_correct / float(total)
+
+    return nc4_match, nc4_mismatch, ncc_acc
+
+
+# ==================== NEW: layerwise NC4 ====================
+
+@torch.no_grad()
+def nc4_layerwise(
+    model: nn.Module,
+    loader,  # callable: loader(epoch) -> iterator
+    means_by_layer: Dict[str, List[torch.Tensor]],  # layer -> [mu_c] (CPU ok)
+    layer_keys: List[str],
+    num_classes: int,
+    device: torch.device,
+) -> Dict[str, Tuple[float, float, float]]:
+    """
+    For EACH layer ℓ, build NCC classifier using class means μ_c^(ℓ),
+    then compare NCC predictions to the network's final-head predictions.
+
+    Returns dict:
+      layer_key -> (nc4_match, nc4_mismatch, ncc_acc)
+
+    Definitions at layer ℓ:
+      ncc_pred^(ℓ)(x) = argmin_c || h_ℓ(x) - μ_c^(ℓ) ||^2
+      net_pred(x)     = argmax logits(x)  (final classifier output)
+
+      nc4_match^(ℓ)   = P( net_pred == ncc_pred^(ℓ) )
+      ncc_acc^(ℓ)     = P( ncc_pred^(ℓ) == y )
+    """
+    model.eval().to(device)
+
+    # stack means on device: Mu[layer] is (C, Dℓ)
+    Mu: Dict[str, torch.Tensor] = {}
+    for k in layer_keys:
+        if k not in means_by_layer:
+            raise KeyError(f"means_by_layer missing key '{k}'.")
+        Mu[k] = torch.stack([m.to(device) for m in means_by_layer[k]], dim=0)  # (C,D)
+
+    total = 0
+    match_ct: Dict[str, int] = {k: 0 for k in layer_keys}
+    ncc_correct: Dict[str, int] = {k: 0 for k in layer_keys}
+
+    out_keys = list(layer_keys)
+    if "classifier" not in out_keys:
+        out_keys.append("classifier")
+
+    it = loader(0)
+    for x, y in tqdm(it, desc="NC4 layerwise (NCC match/acc)", unit="batch", leave=False):
+        x = x.to(device)
+        y = y.to(device)
+
+        outs = model(x, out_feat_keys=out_keys)
+        if not isinstance(outs, (list, tuple)):
+            raise RuntimeError("Expected model(..., out_feat_keys=...) to return list/tuple aligned with out_keys.")
+
+        logits = outs[out_keys.index("classifier")]
+        net_pred = logits.argmax(dim=1)
+
+        total += y.numel()
+
+        for k in layer_keys:
+            feat = outs[out_keys.index(k)]
+            H = gapify(feat)  # (B,D)
+
+            Muk = Mu[k]  # (C,D)
+            H2 = (H * H).sum(dim=1, keepdim=True)         # (B,1)
+            Mu2 = (Muk * Muk).sum(dim=1).view(1, -1)      # (1,C)
+            dist2 = H2 - 2.0 * (H @ Muk.t()) + Mu2        # (B,C)
+
+            ncc_pred = dist2.argmin(dim=1)
+
+            match_ct[k] += (net_pred == ncc_pred).sum().item()
+            ncc_correct[k] += (ncc_pred == y).sum().item()
+
+    if total == 0:
+        raise RuntimeError("nc4_layerwise saw 0 samples.")
+
+    out: Dict[str, Tuple[float, float, float]] = {}
+    for k in layer_keys:
+        m = match_ct[k] / float(total)
+        out[k] = (m, 1.0 - m, ncc_correct[k] / float(total))
+
+    return out
+
+
+@torch.no_grad()
 def compute_epoch_metrics_multilayer(
     model: nn.Module,
-    loader, # This is the DataLoader object (callable)
+    loader,  # This is the DataLoader object (callable)
     num_classes: int,
     layer_keys: List[str],
     device: torch.device,
-) -> Tuple[Dict[str, float], float, float, float]:
+    return_means_penult: bool = False,
+    return_means_by_layer: bool = False,   # NEW
+) -> Union[
+    Tuple[Dict[str, float], float, float, float],
+    Tuple[Dict[str, float], float, float, float, List[torch.Tensor]],
+    Tuple[Dict[str, float], float, float, float, Dict[str, List[torch.Tensor]]],
+    Tuple[Dict[str, float], float, float, float, List[torch.Tensor], Dict[str, List[torch.Tensor]]],
+]:
     """
     Returns:
       nc1_by_layer: dict layer_key -> NC1
       acc: accuracy
       loss: CE loss
       nc3: NC3 computed at classifier feature space (penultimate input to Linear)
-    """
 
+    If return_means_penult=True:
+      also returns means_penult: List[Tensor] of length C, each (D,)
+
+    If return_means_by_layer=True:
+      also returns means_by_layer: Dict[layer_key -> List[Tensor]] (each list length C)
+    """
     model.eval().to(device)
     loss_fn = nn.CrossEntropyLoss()
 
@@ -209,7 +375,6 @@ def compute_epoch_metrics_multilayer(
     penult: Dict[str, torch.Tensor] = {}
 
     def prehook(_m, inputs):
-        # inputs is a tuple; inputs[0] is (N, D)
         penult["h"] = inputs[0].detach()
 
     handle = cls_layer.register_forward_pre_hook(prehook)
@@ -221,7 +386,6 @@ def compute_epoch_metrics_multilayer(
     }
     N_per_class = torch.zeros(C, dtype=torch.long)
 
-    # penultimate sums
     sum_penult: List[Optional[torch.Tensor]] = [None for _ in range(C)]
 
     total_loss = 0.0
@@ -230,26 +394,21 @@ def compute_epoch_metrics_multilayer(
 
     out_keys = list(layer_keys)
     if "classifier" not in out_keys:
-        out_keys.append("classifier") # logits at "classifier"
+        out_keys.append("classifier")
 
-
-    # FIX: Call loader(0) to get the iterator
     iter_pass1 = loader(0)
-
     for x, y in tqdm(iter_pass1, desc="PASS1 (means/acc/loss)", unit="batch", leave=False):
         x = x.to(device)
         y = y.to(device)
 
         outs = model(x, out_feat_keys=out_keys)
-        # outs is list aligned with out_keys
         logits = outs[out_keys.index("classifier")]
         feats = outs if "classifier" in layer_keys else outs[:-1]
 
         if "h" not in penult:
             raise RuntimeError("Penultimate pre-hook didn't fire.")
 
-        h_pen = penult["h"]
-        h_pen = gapify(h_pen)  # should already be (N, D)
+        h_pen = gapify(penult["h"])
 
         bs = y.size(0)
         totalN += bs
@@ -257,25 +416,22 @@ def compute_epoch_metrics_multilayer(
         total_loss += loss_fn(logits, y).item() * bs
         correct += (logits.argmax(1) == y).sum().item()
 
-        # move to CPU for class aggregation
         y_cpu = y.detach().cpu()
 
-        # penultimate class sums
         hp_cpu = h_pen.detach().cpu()
         for c in range(C):
             idx = (y_cpu == c).nonzero(as_tuple=False).squeeze(1)
             if idx.numel() == 0:
                 continue
-            v = hp_cpu[idx]  # (n_c, D)
+            v = hp_cpu[idx]
             if sum_penult[c] is None:
                 sum_penult[c] = v.sum(0)
             else:
                 sum_penult[c] += v.sum(0)
             N_per_class[c] += v.size(0)
 
-        # per-layer class sums
         for k, feat in zip(layer_keys, feats):
-            fv = gapify(feat).detach().cpu()  # (N, Dk)
+            fv = gapify(feat).detach().cpu()
             for c in range(C):
                 idx = (y_cpu == c).nonzero(as_tuple=False).squeeze(1)
                 if idx.numel() == 0:
@@ -292,7 +448,6 @@ def compute_epoch_metrics_multilayer(
         if int(N_per_class[c].item()) == 0:
             raise RuntimeError(f"Class {c} has 0 samples in this split; cannot compute NC metrics.")
 
-    # Build means per layer
     means_by_layer: Dict[str, List[torch.Tensor]] = {}
     for k in layer_keys:
         means_by_layer[k] = [
@@ -300,7 +455,6 @@ def compute_epoch_metrics_multilayer(
             for c in range(C)
         ]
 
-    # Penultimate means
     means_penult: List[torch.Tensor] = [
         sum_penult[c] / float(int(N_per_class[c].item()))  # type: ignore
         for c in range(C)
@@ -309,17 +463,15 @@ def compute_epoch_metrics_multilayer(
     # ---- PASS 2: within-class scatter for NC1 (per layer) ----
     total_ss_by_layer: Dict[str, float] = {k: 0.0 for k in layer_keys}
 
-    # FIX: Call loader(0) to get the iterator
     iter_pass2 = loader(0)
-
     for x, y in tqdm(iter_pass2, desc="PASS2 (Sw per layer)", unit="batch", leave=False):
         x = x.to(device)
         y = y.to(device)
-        outs = model(x, out_feat_keys=layer_keys)  # list aligned to layer_keys
+        outs = model(x, out_feat_keys=layer_keys)
         y_cpu = y.detach().cpu()
 
         for k, feat in zip(layer_keys, outs):
-            fv = gapify(feat).detach().cpu()  # (N, Dk)
+            fv = gapify(feat).detach().cpu()
             for c in range(C):
                 idx = (y_cpu == c).nonzero(as_tuple=False).squeeze(1)
                 if idx.numel() == 0:
@@ -328,11 +480,9 @@ def compute_epoch_metrics_multilayer(
                 z = vc - means_by_layer[k][c]
                 total_ss_by_layer[k] += z.pow(2).sum().item()
 
-    # ---- NC1 finalize per layer ----
     eps = 1e-12
     nc1_by_layer: Dict[str, float] = {}
     for k in layer_keys:
-        # Mmat: (D, C)
         Mmat = torch.stack(means_by_layer[k], dim=1)
         muG = Mmat.mean(dim=1, keepdim=True)
         M_centered = Mmat - muG
@@ -344,11 +494,11 @@ def compute_epoch_metrics_multilayer(
         nc1_by_layer[k] = trSw / (trSb + eps)
 
     # ---- NC3 finalize (penultimate space only) ----
-    Mmat_p = torch.stack(means_penult, dim=1)            # (D, C)
+    Mmat_p = torch.stack(means_penult, dim=1)
     muG_p = Mmat_p.mean(dim=1, keepdim=True)
-    Mc = Mmat_p - muG_p                                  # centered means
+    Mc = Mmat_p - muG_p
 
-    W = cls_layer.weight.detach().cpu().T                # (D, C)
+    W = cls_layer.weight.detach().cpu().T
     Wn = W / (W.norm() + eps)
     Mn = Mc / (Mc.norm() + eps)
     nc3 = (Wn - Mn).pow(2).sum().item()
@@ -359,6 +509,13 @@ def compute_epoch_metrics_multilayer(
     handle.remove()
     penult.clear()
 
+    # ---- NEW flexible returns ----
+    if return_means_penult and return_means_by_layer:
+        return nc1_by_layer, acc, loss, nc3, means_penult, means_by_layer
+    if return_means_penult:
+        return nc1_by_layer, acc, loss, nc3, means_penult
+    if return_means_by_layer:
+        return nc1_by_layer, acc, loss, nc3, means_by_layer
     return nc1_by_layer, acc, loss, nc3
 
 
@@ -376,6 +533,7 @@ def plot_and_save(save_dir: Path, epochs: List[int], series: Dict[str, List[floa
         plt.savefig(save_dir / "plots" / f"{name}.pdf")
         plt.close()
 
+
 def plot_nc1_layers(save_dir: Path, epochs: List[int], nc1_curves: Dict[str, List[float]], title: str) -> None:
     (save_dir / "plots").mkdir(parents=True, exist_ok=True)
     plt.figure()
@@ -389,6 +547,7 @@ def plot_nc1_layers(save_dir: Path, epochs: List[int], nc1_curves: Dict[str, Lis
     plt.savefig(save_dir / "plots" / "nc1_layers.pdf")
     plt.close()
 
+
 def plot_nc1_by_layer(save_dir: Path, layer_keys: List[str], nc1_vals: List[float], title: str) -> None:
     (save_dir / "plots").mkdir(parents=True, exist_ok=True)
     plt.figure()
@@ -400,6 +559,50 @@ def plot_nc1_by_layer(save_dir: Path, layer_keys: List[str], nc1_vals: List[floa
     plt.title(title)
     plt.tight_layout()
     plt.savefig(save_dir / "plots" / "nc1_layers_final.pdf")
+    plt.close()
+
+
+def plot_nc4(save_dir: Path, epochs: List[int], match: List[float], mismatch: List[float], ncc_acc: List[float]) -> None:
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+    plt.figure()
+    plt.plot(epochs, match, marker="o", label="nc4_match")
+    plt.plot(epochs, mismatch, marker="o", label="nc4_mismatch")
+    plt.plot(epochs, ncc_acc, marker="o", label="ncc_acc")
+    plt.xlabel("epoch")
+    plt.ylabel("value")
+    plt.title("NC4 / NCC metrics vs epoch")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / "nc4Plot.pdf")
+    plt.close()
+
+
+# ==================== NEW: plot layerwise NC4 at final epoch ====================
+
+def plot_layerwise_nc4_final(
+    save_dir: Path,
+    layer_keys: List[str],
+    lw_curves: Dict[str, Dict[str, List[float]]],
+    epoch: int,
+) -> None:
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+
+    match = [lw_curves[k]["match"][-1] for k in layer_keys]
+    mismatch = [lw_curves[k]["mismatch"][-1] for k in layer_keys]
+    ncc_acc = [lw_curves[k]["ncc_acc"][-1] for k in layer_keys]
+
+    plt.figure(figsize=(10, 5))
+    x = list(range(len(layer_keys)))
+    plt.plot(x, match, marker="o", label="match")
+    plt.plot(x, mismatch, marker="o", label="mismatch")
+    plt.plot(x, ncc_acc, marker="o", label="ncc_acc")
+    plt.xticks(x, layer_keys, rotation=45, ha="right")
+    plt.xlabel("Layer")
+    plt.ylabel("value")
+    plt.title(f"Layerwise NC4 at epoch {epoch}")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / "nc4_layerwise_final.pdf")
     plt.close()
 
 
@@ -438,8 +641,20 @@ def parse_args():
     p.add_argument("--color-dist-strength", type=float, default=1.0)
 
     # layers to compute NC1 on (use exposed keys like conv1,conv2,conv3,...)
-    p.add_argument("--layers", type=str, default="conv1,conv2,conv3,conv4",
-                   help="Comma list of exposed feature keys for NC1 (e.g. conv1,conv2,conv3,conv4)")
+    p.add_argument(
+        "--layers",
+        type=str,
+        default="conv1,conv2,conv3,conv4",
+        help="Comma list of exposed feature keys for NC1 (e.g. conv1,conv2,conv3,conv4)",
+    )
+
+    # NC4 flags
+    p.add_argument("--nc4", action="store_true", help="Compute NC4 (penultimate NCC Agreement / accuracy) and plot it")
+    p.add_argument(
+        "--nc4-layerwise",
+        action="store_true",
+        help="Compute layerwise NC4: NCC match/acc at each requested layer vs final-head predictions",
+    )
 
     # misc
     p.add_argument("--no-cuda", action="store_true")
@@ -457,26 +672,25 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     config = load_config(args.config_root, args.exp)
-    
+
     # ---------------------------------------------------------
-    # 1. SETUP & MODEL LOADING (Moved UP)
+    # 1. SETUP & MODEL LOADING
     # ---------------------------------------------------------
     exp_dir = Path(args.exp_dir)
     if not exp_dir.is_dir():
         raise FileNotFoundError(f"exp-dir not found: {exp_dir}")
 
-    # Model
     model = build_fresh_model(
         config=config,
         net_key=args.net_key,
         arch_class=args.arch_class,
         use_cuda=use_cuda,
     )
-    
+
     # Load the checkpoint we want to measure (or the last one found)
     epoch_to_path = discover_checkpoints(exp_dir, args.ckpt_glob)
     all_epochs = sorted(epoch_to_path.keys())
-    
+
     # Determine epochs to process
     if args.checkpoint is not None:
         epochs = [args.checkpoint]
@@ -497,100 +711,92 @@ def main():
     # ---------------------------------------------------------
     # 2. AUTO-DISCOVER PERMUTATIONS
     # ---------------------------------------------------------
-    
-    # Re-implementing the core of maxHamming deterministically
-    # There are 4! = 24 possible starting permutations.
-    # We will try all 24 sets.
-    
-    K = 4 # 2x2 grid
+    K = 4  # 2x2 grid
     N = args.num_classes
-    all_base_perms = list(permutations(range(1, K+1))) # 1-based logic from your file
-    
+    all_base_perms = list(permutations(range(1, K + 1)))  # 1-based logic from your file
+
     sigmas = parse_float_list(args.sigmas)
     kernel_sizes = parse_int_list(args.kernel_sizes)
-    if args.pretext_mode == "gaussian_noise" and sigmas is None: sigmas = [1e-3, 1e-2, 1e-1, 1.0]
-    if args.pretext_mode == "gaussian_blur" and kernel_sizes is None: kernel_sizes = [3, 5, 7, 9]
+    if args.pretext_mode == "gaussian_noise" and sigmas is None:
+        sigmas = [1e-3, 1e-2, 1e-1, 1.0]
+    if args.pretext_mode == "gaussian_blur" and kernel_sizes is None:
+        kernel_sizes = [3, 5, 7, 9]
 
     best_perms = None
     best_acc = -1.0
-    
+
     print(f"[Calibration] Testing 24 possible permutation sets...")
-    
-    # Function to generate set starting at index start_idx
-    def get_set_starting_at(start_idx):
+
+    def get_set_starting_at(start_idx: int) -> List[Tuple[int, ...]]:
         # EXACT logic from your maxHamming.py, but j is forced
         P_bar = all_base_perms.copy()
-        P = []
-        j = start_idx # Forced start
-        
+        P: List[Tuple[int, int, int, int]] = []
+        j = start_idx  # Forced start
+
         i = 1
         while i <= N:
             P.append(P_bar[j])
-            P_prime = P_bar[:j] + P_bar[j+1:]
-            
+            P_prime = P_bar[:j] + P_bar[j + 1 :]
+
             if i < N:
-                # Calculate Dist Matrix D
-                # D[x,y] = hamming(P[x], P_prime[y])
                 n_p = len(P)
                 n_pp = len(P_prime)
                 D = np.zeros((n_p, n_pp), dtype=int)
                 for r in range(n_p):
                     for c in range(n_pp):
-                        D[r,c] = np.sum(np.array(P[r]) != np.array(P_prime[c]))
-                
+                        D[r, c] = int(np.sum(np.array(P[r]) != np.array(P_prime[c])))
+
                 D_bar = np.min(D, axis=0)
-                j = np.argmax(D_bar)
-            
+                j = int(np.argmax(D_bar))
+
             P_bar = P_prime
             i += 1
-        return [tuple(x-1 for x in p) for p in P] # Convert to 0-based for loader
 
-    # Search loop
+        return [tuple(x - 1 for x in p) for p in P]  # 0-based for loader
+
     for start_idx in range(len(all_base_perms)):
         candidate_perms = get_set_starting_at(start_idx)
-        
-        # Build quick loader (returns DataLoader callable object)
+
         calib_loader = build_cifar10_pretext_loader(
-            split='test', batch_size=128, workers=0, # fast, no MP overhead
+            split="test",
+            batch_size=128,
+            workers=0,  # fast, no MP overhead
             pretext_mode=args.pretext_mode,
-            sigmas=sigmas, kernel_sizes=kernel_sizes,
+            sigmas=sigmas,
+            kernel_sizes=kernel_sizes,
             patch_jitter=args.patch_jitter,
-            color_distort=False, color_dist_strength=0.0,
-            shuffle=False, fixed_perms=candidate_perms
+            color_distort=False,
+            color_dist_strength=0.0,
+            shuffle=False,
+            fixed_perms=candidate_perms,
         )
-        
-        # Run 1 batch (FIXED: calling loader(0) to get iterator)
+
         x, y = next(iter(calib_loader(0)))
         x, y = x.to(device), y.to(device)
         with torch.no_grad():
             out_raw = model(x)
-            # FIX: Check if output is list/tuple or direct tensor
-            if isinstance(out_raw, (list, tuple)):
-                logits = out_raw[-1]
-            else:
-                logits = out_raw
-            
+            logits = out_raw[-1] if isinstance(out_raw, (list, tuple)) else out_raw
             acc = (logits.argmax(1) == y).float().mean().item()
-            
+
         if acc > best_acc:
             best_acc = acc
             best_perms = candidate_perms
-        
-        # Optimization: If we hit >90%, we found it.
+
         if best_acc > 0.90:
             print(f"[Calibration] Found match at index {start_idx}! Acc: {best_acc:.2%}")
             break
-            
+
     if best_acc < 0.5:
         print(f"\n[WARNING] Best match was only {best_acc:.2%}. Something else might be wrong (e.g. Patch Jitter mismatch).")
     else:
         print(f"[Calibration] Locked in permutation set. Best Acc: {best_acc:.2%}")
 
+    if best_perms is None:
+        raise RuntimeError("Calibration failed to determine best_perms (unexpected).")
+
     # ---------------------------------------------------------
     # 3. MAIN METRICS LOOP
     # ---------------------------------------------------------
-    
-    # Create the REAL loader with the found perms
     loader = build_cifar10_pretext_loader(
         split=args.split,
         batch_size=args.batch_size,
@@ -602,7 +808,7 @@ def main():
         color_distort=args.color_distort,
         color_dist_strength=args.color_dist_strength,
         shuffle=False,
-        fixed_perms=best_perms 
+        fixed_perms=best_perms,
     )
 
     # validate layer keys exist
@@ -624,6 +830,16 @@ def main():
     nc3_curve: List[float] = []
     nc1_curves: Dict[str, List[float]] = {k: [] for k in layer_keys}
 
+    # NC4 storage (penultimate)
+    nc4_match_curve: List[float] = []
+    nc4_mismatch_curve: List[float] = []
+    ncc_acc_curve: List[float] = []
+
+    # NEW: layerwise NC4 storage
+    nc4_layerwise_curves: Dict[str, Dict[str, List[float]]] = {
+        k: {"match": [], "mismatch": [], "ncc_acc": []} for k in layer_keys
+    }
+
     for ep in epochs:
         ckpt = epoch_to_path[ep]
         print(f"\n[SimpleNIN] epoch {ep} -> {ckpt.name}")
@@ -631,13 +847,73 @@ def main():
         load_state_dict(model, ckpt)
         model.to(device)
 
-        nc1_by_layer, acc, loss, nc3 = compute_epoch_metrics_multilayer(
-            model=model,
-            loader=loader,
-            num_classes=args.num_classes,
-            layer_keys=layer_keys,
-            device=device,
-        )
+        if args.nc4 or args.nc4_layerwise:
+            want_pen = bool(args.nc4)
+            want_layer_means = bool(args.nc4_layerwise)
+
+            ret = compute_epoch_metrics_multilayer(
+                model=model,
+                loader=loader,
+                num_classes=args.num_classes,
+                layer_keys=layer_keys,
+                device=device,
+                return_means_penult=want_pen,
+                return_means_by_layer=want_layer_means,
+            )
+
+            if want_pen and want_layer_means:
+                nc1_by_layer, acc, loss, nc3, means_penult, means_by_layer = ret
+            elif want_pen:
+                nc1_by_layer, acc, loss, nc3, means_penult = ret
+                means_by_layer = None
+            else:
+                nc1_by_layer, acc, loss, nc3, means_by_layer = ret
+                means_penult = None
+
+            # penultimate NC4 (original)
+            if args.nc4:
+                nc4_match, nc4_mismatch, ncc_acc = nc4Fun(
+                    model=model,
+                    loader=loader,
+                    means_penult=means_penult,  # type: ignore[arg-type]
+                    num_classes=args.num_classes,
+                    device=device,
+                )
+                nc4_match_curve.append(nc4_match)
+                nc4_mismatch_curve.append(nc4_mismatch)
+                ncc_acc_curve.append(ncc_acc)
+                print(f"[SimpleNIN] nc4_match={nc4_match:.4f} nc4_mismatch={nc4_mismatch:.4f} ncc_acc={ncc_acc:.4f}")
+
+            # layerwise NC4 (NEW)
+            if args.nc4_layerwise:
+                if means_by_layer is None:
+                    raise RuntimeError("Expected means_by_layer but got None (return_means_by_layer=True).")
+                lw = nc4_layerwise(
+                    model=model,
+                    loader=loader,
+                    means_by_layer=means_by_layer,
+                    layer_keys=layer_keys,
+                    num_classes=args.num_classes,
+                    device=device,
+                )
+                for k in layer_keys:
+                    m, mm, a = lw[k]
+                    nc4_layerwise_curves[k]["match"].append(m)
+                    nc4_layerwise_curves[k]["mismatch"].append(mm)
+                    nc4_layerwise_curves[k]["ncc_acc"].append(a)
+
+                deep = layer_keys[-1]
+                m, mm, a = lw[deep]
+                print(f"[SimpleNIN] layerwise-NC4 (deep={deep}) match={m:.4f} mismatch={mm:.4f} ncc_acc={a:.4f}")
+
+        else:
+            nc1_by_layer, acc, loss, nc3 = compute_epoch_metrics_multilayer(
+                model=model,
+                loader=loader,
+                num_classes=args.num_classes,
+                layer_keys=layer_keys,
+                device=device,
+            )
 
         epochs_logged.append(ep)
         acc_curve.append(acc)
@@ -663,6 +939,13 @@ def main():
         "layer_keys": layer_keys,
         "args": vars(args),
     }
+    if args.nc4:
+        payload["nc4_match"] = nc4_match_curve
+        payload["nc4_mismatch"] = nc4_mismatch_curve
+        payload["ncc_acc"] = ncc_acc_curve
+    if args.nc4_layerwise:
+        payload["nc4_layerwise"] = nc4_layerwise_curves
+
     with open(out_dir / "metrics.pkl", "wb") as f:
         pickle.dump(payload, f)
 
@@ -673,9 +956,15 @@ def main():
         last_epoch = epochs_logged[-1]
         last_vals = [nc1_curves[k][-1] for k in layer_keys]
         plot_nc1_by_layer(out_dir, layer_keys, last_vals, f"NC1 across layers at epoch {last_epoch}")
-    
+
+    if args.nc4:
+        plot_nc4(out_dir, epochs_logged, nc4_match_curve, nc4_mismatch_curve, ncc_acc_curve)
+
+    if args.nc4_layerwise and epochs_logged:
+        plot_layerwise_nc4_final(out_dir, layer_keys, nc4_layerwise_curves, epochs_logged[-1])
 
     print(f"\n✓ Done. Results in: {out_dir}")
+
 
 if __name__ == "__main__":
     main()

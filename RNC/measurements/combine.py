@@ -5,20 +5,21 @@ import pickle
 import sys
 import matplotlib.pyplot as plt
 
-# REMOVED: from measurements.measurements import Measurements 
-# (Not needed as we are working with standard python dicts now)
 
 def parse_args():
-    p = argparse.ArgumentParser("Compare two RotNet measurement runs")
+    p = argparse.ArgumentParser("Compare two measurement runs (dict pickles)")
     p.add_argument('--runA', required=True,
                    help='Path to run A results dir OR its metrics.pkl')
     p.add_argument('--runB', required=True,
                    help='Path to run B results dir OR its metrics.pkl')
-    p.add_argument('--out',  required=True,
+    p.add_argument('--out', required=True,
                    help='Directory to write combined plots')
     p.add_argument('--label-a', default='Collapsed', help='Legend label for run A')
     p.add_argument('--label-b', default='Not Collapsed', help='Legend label for run B')
+    p.add_argument('--epoch', type=int, default=200,
+                   help='Epoch to plot layerwise NC4 mismatch for (default: 200)')
     return p.parse_args()
+
 
 def resolve_pkl(pathlike: str) -> Path:
     p = Path(pathlike)
@@ -34,55 +35,87 @@ def resolve_pkl(pathlike: str) -> Path:
         print(f"[info] Multiple metrics.pkl found under {p}, using: {candidates[0]}")
     return candidates[0]
 
-def get_nc1_data(data_dict):
+
+def plot_nc4_layerwise_mismatch_at_epoch(out_dir: Path, dataA, dataB, label_a: str, label_b: str, epoch: int):
     """
-    Helper to extract NC1. 
-    measurementsFix.py saves 'nc1_by_layer'. 
-    We automatically pick the LAST layer (deepest representation), 
-    which is standard for Neural Collapse analysis.
+    Plot ONLY: NC4 layerwise mismatch at a single epoch.
+
+    Expected structure in metrics.pkl:
+      data['epochs'] = [ ... ]
+      data['nc4_layerwise'] = {
+         layer_key: {'match':[...], 'mismatch':[...], 'ncc_acc':[...]}
+      }
+      and optionally:
+      data['layer_keys'] = [layer ordering...]
     """
-    if 'nc1_by_layer' in data_dict:
-        layers_dict = data_dict['nc1_by_layer']
-        keys = list(layers_dict.keys())
+    if 'nc4_layerwise' not in dataA or 'nc4_layerwise' not in dataB:
+        sys.exit("[error] nc4_layerwise not present in BOTH runs. Re-run measurements with layerwise NC4 enabled.")
 
-        if 'classifier' in keys:
-            keys.remove('classifier')
-        # Get the last key (e.g., 'conv4' or 'layer4')
-        last_layer = keys[-1]
-        print(f"[info] Using layer '{last_layer}' for NC1 comparison.")
-        return layers_dict[last_layer]
-    elif 'trSwtrSb' in data_dict:
-        # Legacy support if using old pickles
-        return data_dict['trSwtrSb']
-    else:
-        print("[warning] Could not find NC1 data (nc1_by_layer or trSwtrSb)")
-        return [0] * len(data_dict.get('epochs', []))
+    epochsA = list(map(int, dataA.get('epochs', [])))
+    epochsB = list(map(int, dataB.get('epochs', [])))
+    if epoch not in epochsA or epoch not in epochsB:
+        sys.exit(f"[error] Requested epoch {epoch} not found in both runs. "
+                 f"RunA epochs range: {min(epochsA) if epochsA else 'NA'}..{max(epochsA) if epochsA else 'NA'}, "
+                 f"RunB epochs range: {min(epochsB) if epochsB else 'NA'}..{max(epochsB) if epochsB else 'NA'}")
 
-def get_nc1_by_layer_at(data_dict, epoch_idx):
-    if 'nc1_by_layer' not in data_dict:
-        print("[warning] nc1_by_layer not found; skipping per-layer comparison.")
-        return {}
-    layers_dict = data_dict['nc1_by_layer']
-    out = {}
-    for k, series in layers_dict.items():
-        if epoch_idx < len(series):
-            out[k] = series[epoch_idx]
-    return out
+    iA = epochsA.index(epoch)
+    iB = epochsB.index(epoch)
 
-def plot_nc1_by_layer(out_dir, layers, vals_a, vals_b, label_a, label_b, epoch):
+    lwA = dataA['nc4_layerwise']
+    lwB = dataB['nc4_layerwise']
+
+    # ordering: prefer layer_keys from runA if available
+    layer_order = None
+    if isinstance(dataA.get('layer_keys', None), list) and dataA['layer_keys']:
+        layer_order = [k for k in dataA['layer_keys'] if k in lwA and k in lwB]
+    if not layer_order:
+        layer_order = sorted(set(lwA.keys()).intersection(lwB.keys()))
+
+    if not layer_order:
+        sys.exit("[error] No overlapping layer keys between runs in nc4_layerwise.")
+
+    # extract mismatch values at epoch
+    valsA = []
+    valsB = []
+    kept_layers = []
+    for k in layer_order:
+        if not isinstance(lwA.get(k, None), dict) or not isinstance(lwB.get(k, None), dict):
+            continue
+        if 'mismatch' not in lwA[k] or 'mismatch' not in lwB[k]:
+            continue
+        seriesA = lwA[k]['mismatch']
+        seriesB = lwB[k]['mismatch']
+        if iA >= len(seriesA) or iB >= len(seriesB):
+            continue
+        kept_layers.append(k)
+        valsA.append(seriesA[iA])
+        valsB.append(seriesB[iB])
+
+    if not kept_layers:
+        sys.exit("[error] Found no layers with usable 'mismatch' series in both runs.")
+
+    # plot
     plt.figure(figsize=(10, 5))
-    x = list(range(len(layers)))
-    plt.plot(x, vals_a, 'bx-', label=label_a)
-    plt.plot(x, vals_b, 'ro-', label=label_b)
-    plt.xticks(x, layers, rotation=45, ha='right')
+    x = list(range(len(kept_layers)))
+
+    plt.plot(x, valsA, 'bx-', label=f"{label_a}")
+    plt.plot(x, valsB, 'ro-', label=f"{label_b}")
+
+    plt.xticks(x, kept_layers, rotation=45, ha='right')
     plt.xlabel('Layer')
-    plt.ylabel('NC1')
-    plt.title(f'NC1 across layers at epoch {epoch}')
+    plt.ylabel('NC4 mismatch (1 - match)')
+    plt.title(f'NC4 mismatch per-layer at epoch {epoch}')
     plt.legend(frameon=False)
     plt.grid(True, ls='--', alpha=0.6)
     plt.tight_layout()
-    plt.savefig(out_dir / 'nc1_layers_final_compare.pdf')
+    plt.savefig(out_dir / f'nc4_layerwise_mismatch_epoch{epoch}.pdf')
     plt.close()
+
+    # also print a quick text summary for sanity
+    print(f"[info] Saved: {out_dir / f'nc4_layerwise_mismatch_epoch{epoch}.pdf'}")
+    for k, a, b in zip(kept_layers, valsA, valsB):
+        print(f"  {k:>24s} | {label_a}: {a:.6f}  {label_b}: {b:.6f}")
+
 
 def main():
     args = parse_args()
@@ -96,142 +129,22 @@ def main():
     print(f"Loading A: {pklA}")
     with open(pklA, 'rb') as f:
         dataA = pickle.load(f)
-        
+
     print(f"Loading B: {pklB}")
     with open(pklB, 'rb') as f:
         dataB = pickle.load(f)
 
-    # Handle structure mismatch: 
-    # If 'payload' exists, unwrap it (legacy). If not, use dict directly (new).
-    if 'payload' in dataA:
-        print("[info] Detected legacy format for Run A (unwrapping payload)")
-        # This converts the legacy object to a dict if possible, or keeps the object
-        # But based on your error, you are likely using the dictionary format now.
-        # We will assume dataA is the Dictionary from measurementsFix.py
-        pass 
-        
-    # Extract Epochs
-    epochsA = list(map(int, dataA['epochs']))
-    epochsB = list(map(int, dataB['epochs']))
+    plot_nc4_layerwise_mismatch_at_epoch(
+        out_dir=out_dir,
+        dataA=dataA,
+        dataB=dataB,
+        label_a=args.label_a,
+        label_b=args.label_b,
+        epoch=args.epoch,
+    )
 
-    # Align to common epochs
-    common = sorted(set(epochsA).intersection(epochsB))
-    if not common:
-        sys.exit("No overlapping epochs between runs.")
-    
-    print(f"Comparing {len(common)} common epochs...")
-    idxA = [epochsA.index(e) for e in common]
-    idxB = [epochsB.index(e) for e in common]
+    print("✓ Done – results in", out_dir)
 
-    def sel(vals, idx):
-        return [vals[i] for i in idx]
-
-    def plot_metric(name, yA, yB, ylabel=None, logy=False, filename=None):
-        plt.figure(figsize=(8,6))
-        if logy:
-            plt.semilogy(common, yA, 'bx-', label=args.label_a)
-            plt.semilogy(common, yB, 'ro-', label=args.label_b)
-        else:
-            plt.plot(common, yA, 'bx-', label=args.label_a)
-            plt.plot(common, yB, 'ro-', label=args.label_b)
-        plt.xlabel('Epoch')
-        plt.ylabel(ylabel or name)
-        plt.title(f"{ylabel or name} vs Epoch")
-        plt.legend(frameon=False)
-        plt.grid(True, which='both' if logy else 'major', ls='--', alpha=0.6)
-        plt.tight_layout()
-        plt.savefig(out_dir / (filename or f"{name}.pdf"))
-        plt.close()
-
-    # --- EXTRACT METRICS SAFELY ---
-    
-    # 1) Training loss (linear)
-    # New format key: 'loss', Legacy obj attr: .loss
-    lossA = dataA['loss']
-    lossB = dataB['loss']
-    plot_metric('loss',
-                sel(lossA, idxA),
-                sel(lossB, idxB),
-                ylabel='Training Loss',
-                filename='training_loss.pdf')
-
-    # 2) Training accuracy (%)
-    # New format key: 'accuracy', Legacy obj attr: .accuracy
-    accA = [v*100 for v in sel(dataA['accuracy'], idxA)]
-    accB = [v*100 for v in sel(dataB['accuracy'], idxB)]
-    plot_metric('accuracy',
-                accA,
-                accB,
-                ylabel='Training Accuracy (%)',
-                filename='training_accuracy.pdf')
-
-    # 3) NC1 (log-scale)
-    # New format key: 'nc1_by_layer' (dict), Legacy obj attr: .trSwtrSb
-    nc1_A_full = get_nc1_data(dataA)
-    nc1_B_full = get_nc1_data(dataB)
-    
-    plot_metric('nc1',
-                sel(nc1_A_full, idxA),
-                sel(nc1_B_full, idxB),
-                ylabel='NC1',
-                logy=True,
-                filename='nc1.pdf')
-
-    # 4) NC3 (linear)
-    # New format key: 'nc3', Legacy obj attr: .W_M_dist
-    # Note: measurementsFix.py calls it 'nc3', old calls it 'W_M_dist'
-    nc3_A_full = dataA.get('nc3', dataA.get('W_M_dist', []))
-    nc3_B_full = dataB.get('nc3', dataB.get('W_M_dist', []))
-    
-    plot_metric('nc3',
-                sel(nc3_A_full, idxA),
-                sel(nc3_B_full, idxB),
-                ylabel='NC3',
-                filename='nc3.pdf')
-
-    # 5) Combined NC1 and NC3 subplot
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    
-    # NC1 plot (log scale)
-    nc1_A = sel(nc1_A_full, idxA)
-    nc1_B = sel(nc1_B_full, idxB)
-    ax1.semilogy(common, nc1_A, 'bx-', label=args.label_a)
-    ax1.semilogy(common, nc1_B, 'ro-', label=args.label_b)
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('NC1')
-    ax1.set_title('NC1 vs Epoch')
-    ax1.legend()
-    ax1.grid(True, alpha=0.6)
-    
-    # NC3 plot (linear scale)
-    nc3_A = sel(nc3_A_full, idxA)
-    nc3_B = sel(nc3_B_full, idxB)
-    ax2.plot(common, nc3_A, 'bx-', label=args.label_a)
-    ax2.plot(common, nc3_B, 'ro-', label=args.label_b)
-    ax2.set_xlabel('Epoch')
-    ax2.set_ylabel('NC3')
-    ax2.set_title('NC3 vs Epoch')
-    ax2.legend()
-    ax2.grid(True, alpha=0.6)
-    
-    plt.tight_layout()
-    plt.savefig(out_dir / 'nc1_nc3_comparison.pdf')
-    plt.close()
-
-    # 6) NC1 per-layer at final common epoch
-    last_common_epoch = common[-1]
-    nc1_layers_A = get_nc1_by_layer_at(dataA, idxA[-1])
-    nc1_layers_B = get_nc1_by_layer_at(dataB, idxB[-1])
-    if nc1_layers_A and nc1_layers_B:
-        layers = [k for k in nc1_layers_A.keys() if k in nc1_layers_B]
-        if layers:
-            vals_a = [nc1_layers_A[k] for k in layers]
-            vals_b = [nc1_layers_B[k] for k in layers]
-            plot_nc1_by_layer(out_dir, layers, vals_a, vals_b, args.label_a, args.label_b, last_common_epoch)
-        else:
-            print("[warning] No overlapping layer keys for nc1_by_layer; skipping per-layer plot.")
-
-    print("✓  Done – results in", out_dir)
 
 if __name__ == "__main__":
     main()

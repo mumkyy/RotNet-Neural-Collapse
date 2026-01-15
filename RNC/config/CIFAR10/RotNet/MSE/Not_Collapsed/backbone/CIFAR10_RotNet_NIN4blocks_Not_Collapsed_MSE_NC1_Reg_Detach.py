@@ -33,8 +33,8 @@ networks['model'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretraine
 config['networks'] = networks
 
 config['nc_reg'] = {
-    'layers': ['classifier','conv4','conv3','conv2'],  # which layers to regularize
-    'weights': {'classifier': 0.01, 'conv4':0.001,'conv3':0.001, 'conv2': 0.001},
+    'layers': ['conv1.Block1_ConvB1','conv1.Block1_ConvB2','conv1.Block1_ConvB3','conv1.Block1_MaxPool','conv2.Block2_ConvB1','conv2.Block2_ConvB2','conv2.Block2_ConvB3','conv2.Block2_AvgPool','conv3.Block3_ConvB1','conv3.Block3_ConvB2','conv3.Block3_ConvB3','conv4.Block4_ConvB1','conv4.Block4_ConvB2','conv4.Block4_ConvB3','classifier'],  # which layers to regularize
+    'weights': {'conv1.Block1_ConvB1': 0.001,'conv1.Block1_ConvB2': 0.001,'conv1.Block1_ConvB3': 0.001,'conv1.Block1_MaxPool': 0.001,'conv2.Block2_ConvB1': 0.001,'conv2.Block2_ConvB2': 0.001,'conv2.Block2_ConvB3': 0.001,'conv2.Block2_AvgPool': 0.001,'conv3.Block3_ConvB1': 0.001,'conv3.Block3_ConvB2': 0.001,'conv3.Block3_ConvB3': 0.001,'conv4.Block4_ConvB1': 0.001,'conv4.Block4_ConvB2': 0.001,'conv4.Block4_ConvB3': 0.001,'classifier': 0.001},
     'detach_sb': True,
 }
 
