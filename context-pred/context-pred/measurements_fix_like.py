@@ -6,6 +6,7 @@ import importlib
 import importlib.util
 from pathlib import Path
 import sys
+import pickle
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -41,6 +42,13 @@ def _load_state_dict(model: nn.Module, ckpt_path: Path) -> None:
     else:
         sd = state
     model.load_state_dict(sd, strict=True)
+
+
+def _parse_epoch(ckpt_path: Path) -> int:
+    try:
+        return int(ckpt_path.stem)
+    except ValueError:
+        return 0
 
 
 def _split_pair(x):
@@ -106,6 +114,8 @@ def main():
     p.add_argument("--batch-size", type=int, default=None)
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--nc4", action="store_true")
+    p.add_argument("--out-root", type=str, default="results_simple_nc")
+    p.add_argument("--tag", type=str, default=None)
     p.add_argument("--no-cuda", action="store_true")
     args = p.parse_args()
 
@@ -116,8 +126,9 @@ def main():
     if net_cfg.get("arch", "AlexNetwork") != "AlexNetwork":
         raise RuntimeError("This script expects an AlexNetwork pretext config.")
 
+    ckpt_path = Path(args.ckpt)
     base = AlexNetwork(**net_cfg.get("opt", {}))
-    _load_state_dict(base, Path(args.ckpt))
+    _load_state_dict(base, ckpt_path)
     model = ContextPredWrapper(base)
 
     use_cuda = torch.cuda.is_available() and not args.no_cuda
@@ -143,6 +154,15 @@ def main():
 
     mf = _load_measurements_fix()
     layer_keys = [k.strip() for k in args.layers.split(",") if k.strip()]
+    epoch = _parse_epoch(ckpt_path)
+    epochs = [epoch]
+
+    if args.tag:
+        tag = args.tag
+    else:
+        tag = f"{args.config.replace('.', '_')}_{args.split}"
+    out_dir = Path(args.out_root) / tag
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.nc4:
         nc1_by_layer, acc, loss, nc3, means_penult = mf.compute_epoch_metrics_multilayer(
@@ -160,6 +180,14 @@ def main():
             num_classes=args.num_classes,
             device=device,
         )
+        nc4_match_curve = [nc4_match]
+        nc4_mismatch_curve = [nc4_mismatch]
+        ncc_acc_curve = [ncc_acc]
+        acc_curve = [acc]
+        loss_curve = [loss]
+        nc3_curve = [nc3]
+        nc1_curves = {k: [nc1_by_layer[k]] for k in layer_keys}
+
         print(f"acc={acc:.4f} loss={loss:.4f} nc3={nc3:.6f}")
         print("nc1:", " | ".join([f"{k}={nc1_by_layer[k]:.6f}" for k in layer_keys]))
         print(f"nc4_match={nc4_match:.4f} nc4_mismatch={nc4_mismatch:.4f} ncc_acc={ncc_acc:.4f}")
@@ -171,8 +199,36 @@ def main():
             layer_keys=layer_keys,
             device=device,
         )
+        acc_curve = [acc]
+        loss_curve = [loss]
+        nc3_curve = [nc3]
+        nc1_curves = {k: [nc1_by_layer[k]] for k in layer_keys}
+
         print(f"acc={acc:.4f} loss={loss:.4f} nc3={nc3:.6f}")
         print("nc1:", " | ".join([f"{k}={nc1_by_layer[k]:.6f}" for k in layer_keys]))
+
+    payload = {
+        "epochs": epochs,
+        "accuracy": acc_curve,
+        "loss": loss_curve,
+        "nc3": nc3_curve,
+        "nc1_by_layer": nc1_curves,
+        "layer_keys": layer_keys,
+        "args": vars(args),
+    }
+    if args.nc4:
+        payload["nc4_match"] = nc4_match_curve
+        payload["nc4_mismatch"] = nc4_mismatch_curve
+        payload["ncc_acc"] = ncc_acc_curve
+
+    with open(out_dir / "metrics.pkl", "wb") as f:
+        pickle.dump(payload, f)
+
+    mf.plot_and_save(out_dir, epochs, {"accuracy": acc_curve, "loss": loss_curve, "nc3": nc3_curve}, "ContextPred")
+    mf.plot_and_save(out_dir, epochs, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, "ContextPred")
+    mf.plot_nc1_by_layer(out_dir, layer_keys, [nc1_curves[k][-1] for k in layer_keys], f"NC1 across layers at epoch {epoch}")
+    if args.nc4:
+        mf.plot_nc4(out_dir, epochs, nc4_match_curve, nc4_mismatch_curve, ncc_acc_curve)
 
 
 if __name__ == "__main__":
