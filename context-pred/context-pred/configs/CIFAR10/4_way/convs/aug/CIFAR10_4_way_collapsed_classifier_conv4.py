@@ -4,13 +4,13 @@ config = {}
 
 data_train_opt = {}
 data_train_opt['batch_size']        = batch_size
-data_train_opt['dataset_name']      = 'Imagenette'   
+data_train_opt['dataset_name']      = 'CIFAR10'    
 data_train_opt['dataset_root']   = 'data'
 data_train_opt['split']             = 'train'
 
 data_test_opt = {}
 data_test_opt['batch_size']        = batch_size
-data_test_opt['dataset_name']      = 'Imagenette'  
+data_test_opt['dataset_name']      = 'CIFAR10'   
 data_test_opt['dataset_root']   = 'data'
 data_test_opt['split']             = 'val'
 

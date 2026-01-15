@@ -232,15 +232,21 @@ def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=No
 
   name = str(dataset_name).lower()
 
-  is_cifar = name in {"cifar10", "cifar-10", "CIFAR10"}
+  is_cifar = name in {"cifar10", "cifar-10"}
 
-  tf = [transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
+  mean = [0.485, 0.456, 0.406]
+  std = [0.229, 0.224, 0.225]
 
-  btf = transforms.Resize((160, 160))
+  if is_cifar:
+    btf = None
+  else:
+    btf = transforms.Resize((160, 160))
+
+  tf = [transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]
   
   supervised = (mode == Modes.SUPERVISED)
 
-  if supervised:
+  if supervised and btf is not None:
     tf.insert(0,btf)
 
   tf = transforms.Compose(tf)

@@ -4,13 +4,13 @@ config = {}
 
 data_train_opt = {}
 data_train_opt['batch_size']        = batch_size
-data_train_opt['dataset_name']      = 'Imagenette'   
+data_train_opt['dataset_name']      = 'CIFAR10'     
 data_train_opt['dataset_root']   = 'data'
 data_train_opt['split']             = 'train'
 
 data_test_opt = {}
 data_test_opt['batch_size']        = batch_size
-data_test_opt['dataset_name']      = 'Imagenette'  
+data_test_opt['dataset_name']      = 'CIFAR10'   
 data_test_opt['dataset_root']   = 'data'
 data_test_opt['split']             = 'val'
 
@@ -21,8 +21,7 @@ config['max_num_epochs'] = 100
 
 networks = {}
 
-feat_pretrained_file = './checkpoints/4_way/backbone/aug/imagenette_4_way_collapsed_backbone/200.pt'
-
+feat_pretrained_file = './checkpoints/CIFAR10/4_way/backbone/aug/CIFAR10_4_way_collapsed_backbone/200.pt'
 cls_net_opt = {
     'num_classes':   10,                     
     'backbone_ckpt': feat_pretrained_file,   
