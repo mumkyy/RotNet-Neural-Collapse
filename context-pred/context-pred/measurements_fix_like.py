@@ -7,6 +7,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import pickle
+import re
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -44,11 +45,27 @@ def _load_state_dict(model: nn.Module, ckpt_path: Path) -> None:
     model.load_state_dict(sd, strict=True)
 
 
-def _parse_epoch(ckpt_path: Path) -> int:
-    try:
-        return int(ckpt_path.stem)
-    except ValueError:
-        return 0
+def _parse_epoch_from_stem(stem: str) -> int:
+    nums = re.findall(r"\d+", stem)
+    if not nums:
+        raise ValueError(f"No epoch number found in checkpoint name: {stem}")
+    return int(nums[-1])
+
+
+def _discover_checkpoints(ckpt_dir: Path, ckpt_glob: str) -> dict:
+    paths = list(ckpt_dir.glob(ckpt_glob))
+    if not paths:
+        raise RuntimeError(f"No checkpoints found in {ckpt_dir} matching '{ckpt_glob}'")
+    out = {}
+    for p in paths:
+        try:
+            ep = _parse_epoch_from_stem(p.stem)
+        except ValueError:
+            continue
+        out[ep] = p
+    if not out:
+        raise RuntimeError("Found checkpoint files but failed to parse epoch numbers.")
+    return out
 
 
 def _split_pair(x):
@@ -107,7 +124,13 @@ class ContextPredWrapper(nn.Module):
 def main():
     p = argparse.ArgumentParser("Context-pred NC metrics (measurementsFix-like)")
     p.add_argument("--config", required=True, help="configs.<name> (e.g. CIFAR10.4_way.backbone.aug.CIFAR10_4_way_collapsed_backbone)")
-    p.add_argument("--ckpt", required=True, help="Path to checkpoint (.pt)")
+    p.add_argument("--ckpt", help="Path to single checkpoint (.pt)")
+    p.add_argument("--ckpt-dir", help="Directory of checkpoints to scan")
+    p.add_argument("--ckpt-glob", default="*.pt", help="Glob pattern inside --ckpt-dir")
+    p.add_argument("--checkpoint", type=int, default=None, help="Single epoch to measure (when using --ckpt-dir)")
+    p.add_argument("--start-epoch", type=int, default=None)
+    p.add_argument("--end-epoch", type=int, default=None)
+    p.add_argument("--stride", type=int, default=10)
     p.add_argument("--split", choices=["train", "val"], default="val")
     p.add_argument("--layers", default="conv1,conv2,conv3,conv4")
     p.add_argument("--num-classes", type=int, default=4)
@@ -126,9 +149,7 @@ def main():
     if net_cfg.get("arch", "AlexNetwork") != "AlexNetwork":
         raise RuntimeError("This script expects an AlexNetwork pretext config.")
 
-    ckpt_path = Path(args.ckpt)
     base = AlexNetwork(**net_cfg.get("opt", {}))
-    _load_state_dict(base, ckpt_path)
     model = ContextPredWrapper(base)
 
     use_cuda = torch.cuda.is_available() and not args.no_cuda
@@ -154,8 +175,24 @@ def main():
 
     mf = _load_measurements_fix()
     layer_keys = [k.strip() for k in args.layers.split(",") if k.strip()]
-    epoch = _parse_epoch(ckpt_path)
-    epochs = [epoch]
+
+    if args.ckpt:
+        ckpt_paths = {_parse_epoch_from_stem(Path(args.ckpt).stem): Path(args.ckpt)}
+    elif args.ckpt_dir:
+        ckpt_paths = _discover_checkpoints(Path(args.ckpt_dir), args.ckpt_glob)
+    else:
+        raise RuntimeError("Provide either --ckpt or --ckpt-dir.")
+
+    all_epochs = sorted(ckpt_paths.keys())
+    if args.checkpoint is not None:
+        epochs = [args.checkpoint]
+    elif args.start_epoch is not None or args.end_epoch is not None:
+        s = args.start_epoch if args.start_epoch is not None else min(all_epochs)
+        e = args.end_epoch if args.end_epoch is not None else max(all_epochs)
+        epochs = [ep for ep in all_epochs if s <= ep <= e]
+    else:
+        mx = max(all_epochs)
+        epochs = sorted({ep for ep in all_epochs if (ep % args.stride == 0) or (ep == mx)})
 
     if args.tag:
         tag = args.tag
@@ -164,48 +201,59 @@ def main():
     out_dir = Path(args.out_root) / tag
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.nc4:
-        nc1_by_layer, acc, loss, nc3, means_penult = mf.compute_epoch_metrics_multilayer(
-            model=model,
-            loader=loader,
-            num_classes=args.num_classes,
-            layer_keys=layer_keys,
-            device=device,
-            return_means_penult=True,
-        )
-        nc4_match, nc4_mismatch, ncc_acc = mf.nc4Fun(
-            model=model,
-            loader=loader,
-            means_penult=means_penult,
-            num_classes=args.num_classes,
-            device=device,
-        )
-        nc4_match_curve = [nc4_match]
-        nc4_mismatch_curve = [nc4_mismatch]
-        ncc_acc_curve = [ncc_acc]
-        acc_curve = [acc]
-        loss_curve = [loss]
-        nc3_curve = [nc3]
-        nc1_curves = {k: [nc1_by_layer[k]] for k in layer_keys}
+    acc_curve = []
+    loss_curve = []
+    nc3_curve = []
+    nc1_curves = {k: [] for k in layer_keys}
+    nc4_match_curve = []
+    nc4_mismatch_curve = []
+    ncc_acc_curve = []
 
-        print(f"acc={acc:.4f} loss={loss:.4f} nc3={nc3:.6f}")
-        print("nc1:", " | ".join([f"{k}={nc1_by_layer[k]:.6f}" for k in layer_keys]))
-        print(f"nc4_match={nc4_match:.4f} nc4_mismatch={nc4_mismatch:.4f} ncc_acc={ncc_acc:.4f}")
-    else:
-        nc1_by_layer, acc, loss, nc3 = mf.compute_epoch_metrics_multilayer(
-            model=model,
-            loader=loader,
-            num_classes=args.num_classes,
-            layer_keys=layer_keys,
-            device=device,
-        )
-        acc_curve = [acc]
-        loss_curve = [loss]
-        nc3_curve = [nc3]
-        nc1_curves = {k: [nc1_by_layer[k]] for k in layer_keys}
+    model.to(device)
+    for ep in epochs:
+        ckpt_path = ckpt_paths.get(ep)
+        if ckpt_path is None:
+            raise RuntimeError(f"Requested epoch {ep} not found in checkpoints.")
+        _load_state_dict(base, ckpt_path)
 
-        print(f"acc={acc:.4f} loss={loss:.4f} nc3={nc3:.6f}")
+        if args.nc4:
+            nc1_by_layer, acc, loss, nc3, means_penult = mf.compute_epoch_metrics_multilayer(
+                model=model,
+                loader=loader,
+                num_classes=args.num_classes,
+                layer_keys=layer_keys,
+                device=device,
+                return_means_penult=True,
+            )
+            nc4_match, nc4_mismatch, ncc_acc = mf.nc4Fun(
+                model=model,
+                loader=loader,
+                means_penult=means_penult,
+                num_classes=args.num_classes,
+                device=device,
+            )
+            nc4_match_curve.append(nc4_match)
+            nc4_mismatch_curve.append(nc4_mismatch)
+            ncc_acc_curve.append(ncc_acc)
+        else:
+            nc1_by_layer, acc, loss, nc3 = mf.compute_epoch_metrics_multilayer(
+                model=model,
+                loader=loader,
+                num_classes=args.num_classes,
+                layer_keys=layer_keys,
+                device=device,
+            )
+
+        acc_curve.append(acc)
+        loss_curve.append(loss)
+        nc3_curve.append(nc3)
+        for k in layer_keys:
+            nc1_curves[k].append(nc1_by_layer[k])
+
+        print(f"epoch={ep} acc={acc:.4f} loss={loss:.4f} nc3={nc3:.6f}")
         print("nc1:", " | ".join([f"{k}={nc1_by_layer[k]:.6f}" for k in layer_keys]))
+        if args.nc4:
+            print(f"nc4_match={nc4_match:.4f} nc4_mismatch={nc4_mismatch:.4f} ncc_acc={ncc_acc:.4f}")
 
     payload = {
         "epochs": epochs,
