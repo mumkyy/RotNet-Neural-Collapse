@@ -133,13 +133,21 @@ def main():
 
   global_trn_loss = []
   global_val_loss = []
+  global_trn_acc  = []
   global_val_acc  = []
+
+  metrics_path = os.path.join(checkpoint_dir, "metrics.txt")
+  if (not os.path.exists(metrics_path)) or (os.path.getsize(metrics_path) == 0):
+    with open(metrics_path, "w") as f:
+      f.write("epoch,train_loss,val_loss,train_acc,val_acc\n")
 
   for epoch in range(num_epochs):
       train_running_loss = []
       val_running_loss = []
       start_time = time.time()
       model.train()
+      train_correct = 0
+      train_total = 0
 
       #train
       for idx, data in tqdm(enumerate(trainloader), total=len(trainloader)):
@@ -167,10 +175,15 @@ def main():
               target.scatter_(1, labels.unsqueeze(1), 1.0)
               loss = criterion(output, target)
 
+          _, predicted = output.max(1)
+          train_total += labels.size(0)
+          train_correct += (predicted == labels).sum().item()
+
           loss.backward()
           optimizer.step()
           train_running_loss.append(loss.item())
         
+      train_acc = 100.0 * train_correct / max(1, train_total)
       correct = 0
       total = 0
 
@@ -212,12 +225,13 @@ def main():
 
       global_trn_loss.append(avg_train_loss)
       global_val_loss.append(avg_val_loss)
+      global_trn_acc.append(train_acc)
       global_val_acc.append(val_acc)
 
       scheduler.step(avg_val_loss)
 
-      print('Epoch [{}/{}], TRNLoss:{:.4f}, VALLoss:{:.4f}, Time:{:.2f}'.format(
-          epoch + 1, num_epochs, avg_train_loss, avg_val_loss,
+      print('Epoch [{}/{}], TRNLoss:{:.4f}, TRNAcc:{:.2f}%, VALLoss:{:.4f}, VALAcc:{:.2f}%, Time:{:.2f}'.format(
+          epoch + 1, num_epochs, avg_train_loss, train_acc, avg_val_loss, val_acc,
           (time.time() - start_time) / 60))
       
       if (epoch+1) % 20 == 0:
@@ -229,8 +243,8 @@ def main():
             },
             model_save_path,
         )
-      with open(f'{checkpoint_dir}/metrics.txt', 'a') as f:
-        f.write(f'{epoch+1},{global_trn_loss[-1]},{global_val_loss[-1]},{val_acc}\n')
+      with open(metrics_path, 'a') as f:
+        f.write(f'{epoch+1},{global_trn_loss[-1]},{global_val_loss[-1]},{train_acc},{val_acc}\n')
 
   plot_path = f'{checkpoint_dir}/training_plots.png'
   plt.figure(figsize=(12, 5))
@@ -242,10 +256,11 @@ def main():
   plt.title('Training / Validation Loss')
   plt.legend()
   plt.subplot(1, 2, 2)
+  plt.plot(range(1, len(global_trn_acc)+1), global_trn_acc, label='Train Acc', marker='x', color='blue')
   plt.plot(range(1, len(global_val_acc)+1), global_val_acc, label='Val Acc', marker='o', color='green')
   plt.xlabel('Epoch')
   plt.ylabel('Accuracy (%)')
-  plt.title('Validation Accuracy')
+  plt.title('Training / Validation Accuracy')
   plt.legend()
   plt.tight_layout()
   plt.savefig(plot_path, dpi=150, bbox_inches='tight')

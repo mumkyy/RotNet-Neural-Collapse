@@ -234,24 +234,25 @@ def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=No
 
   is_cifar = name in {"cifar10", "cifar-10"}
 
-  mean = [0.485, 0.456, 0.406]
-  std = [0.229, 0.224, 0.225]
-
   if is_cifar:
     btf = None
   else:
     btf = transforms.Resize((160, 160))
 
-  tf = [transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]
-  
-  supervised = (mode == Modes.SUPERVISED)
-
-  if supervised and btf is not None:
-    tf.insert(0,btf)
-
-  tf = transforms.Compose(tf)
 
   if is_cifar:
+    mean = [0.4914, 0.4822, 0.4465]
+    std = [0.247, 0.243, 0.261]
+    
+    tf = [transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]
+  
+    supervised = (mode == Modes.SUPERVISED)
+
+    if supervised and btf is not None:
+      tf.insert(0,btf)
+
+    tf = transforms.Compose(tf)
+
     download_flag = not os.path.isdir(os.path.join(root, "cifar-10-batches-py"))
     train_data = datasets.CIFAR10(
       root=root,
@@ -268,6 +269,19 @@ def get_loaders(mode,patch_dim,batch_size,num_workers,root,gap=None,chromatic=No
 
 
   else:
+
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    tf = [transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)]
+  
+    supervised = (mode == Modes.SUPERVISED)
+
+    if supervised and btf is not None:
+      tf.insert(0,btf)
+
+    tf = transforms.Compose(tf)
+
     possible_dirs = [
         os.path.join(root, "imagenette2-160"),
         os.path.join(root, "imagenette2")  
