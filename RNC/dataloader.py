@@ -181,6 +181,7 @@ class GenericDataset(data.Dataset):
                 download=True, transform=self.transform)
         
         elif self.dataset_name == 'imagenette':
+            dn = 'Imagenette'
             self.mean_pix = [0.485, 0.456, 0.406]
             self.std_pix = [0.229, 0.224, 0.225]
 
@@ -204,7 +205,7 @@ class GenericDataset(data.Dataset):
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x).copy(),
                     ]
-            self.data = datasets.__dict__[self.dataset_name](
+            self.data = datasets.__dict__[dn](
                 _IMAGENETTE_DATASET_DIR, train=self.split=='train',
                 download=True, transform=self.transform)
         
