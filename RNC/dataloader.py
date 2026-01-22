@@ -205,9 +205,9 @@ class GenericDataset(data.Dataset):
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x).copy(),
                     ]
-            self.data = torchvision.datasets.Imagenette(_IMAGENETTE_DATASET_DIR,
+            self.data = torchvision.datasets.Imagenette(root=_IMAGENETTE_DATASET_DIR,
                                                          split="train",
-                                                         download=False,
+                                                         download=True,
                                                          transform=self.transform)
         
         else:
