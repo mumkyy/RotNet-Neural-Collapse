@@ -204,7 +204,7 @@ class GenericDataset(data.Dataset):
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x).copy(),
                     ]
-            self.data = datasets.__dict__[self.dataset_name.upper()](
+            self.data = datasets.__dict__[self.dataset_name](
                 _IMAGENETTE_DATASET_DIR, train=self.split=='train',
                 download=True, transform=self.transform)
         
