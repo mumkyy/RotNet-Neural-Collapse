@@ -181,7 +181,6 @@ class GenericDataset(data.Dataset):
                 download=True, transform=self.transform)
         
         elif self.dataset_name == 'imagenette':
-            dn = 'Imagenette'
             self.mean_pix = [0.485, 0.456, 0.406]
             self.std_pix = [0.229, 0.224, 0.225]
 
@@ -205,11 +204,9 @@ class GenericDataset(data.Dataset):
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x).copy(),
                     ]
-            self.data = torchvision.datasets.Imagenette(root=_IMAGENETTE_DATASET_DIR,
-                                                         split="train",
-                                                         download=True,
-                                                         transform=self.transform)
-        
+            self.transform = transforms.Compose(transforms_list)
+            split_data_dir = _IMAGENETTE_DATASET_DIR + '/' + self.split
+            self.data = datasets.ImageFolder(split_data_dir, self.transform)
         else:
             raise ValueError('Not recognized dataset {0}'.format(self.dataset_name))
         
