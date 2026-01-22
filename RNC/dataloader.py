@@ -24,7 +24,7 @@ from pdb import set_trace as breakpoint
 _CIFAR_DATASET_DIR = './datasets/cifar10'
 _IMAGENET_DATASET_DIR = './datasets/IMAGENET/ILSVRC2012'
 _PLACES205_DATASET_DIR = './datasets/Places205'
-_IMAGENETTE_DATASET_DIR = './datasets/Imagenette'
+_IMAGENETTE_DATASET_DIR = './datasets/Imagenette/imagenette2-160/'
 
 
 def buildLabelIndex(labels):
