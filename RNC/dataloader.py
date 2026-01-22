@@ -492,7 +492,14 @@ class DataLoader(object):
                     label_tensor = torch.LongTensor([label])
 
                     return jigsaw_tensor, label_tensor
-
+                
+                if getattr(self.dataset, "dataset_name", "") == "imagenette":
+                    rot = random.choice([0, 90, 180, 270])
+                    rot_label = {0: 0, 90: 1, 180: 2, 270: 3}[rot]
+                    img_r = img0 if rot == 0 else rotate_img(img0, rot)
+                    x = self.transform(img_r)
+                    y = torch.tensor(rot_label, dtype=torch.long)
+                    return x, y
 
                 rotated_imgs = [
                     self.transform(img0),
@@ -504,6 +511,12 @@ class DataLoader(object):
                 return torch.stack(rotated_imgs, dim=0), rotation_labels
             
             def _collate_fun(batch):
+                
+                # Imagenette single-rotation path returns (B,C,H,W) already.
+                if getattr(self.dataset, "dataset_name", "") == "imagenette" \
+                and getattr(self.dataset, "pretext_mode", "rotation") == "rotation":
+                    return batch
+
                 batch = default_collate(batch)
                 assert(len(batch)==2)
                 batch_size, rotations, channels, height, width = batch[0].size()
