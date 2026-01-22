@@ -205,8 +205,7 @@ class GenericDataset(data.Dataset):
                         lambda x: np.asarray(x).copy(),
                     ]
             self.transform = transforms.Compose(transforms_list)
-            split_data_dir = _IMAGENETTE_DATASET_DIR + '/' + self.split
-            self.data = datasets.ImageFolder(split_data_dir, self.transform)
+            self.data = datasets.ImageFolder(_IMAGENETTE_DATASET_DIR, self.transform)
         else:
             raise ValueError('Not recognized dataset {0}'.format(self.dataset_name))
         
