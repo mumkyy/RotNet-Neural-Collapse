@@ -180,7 +180,7 @@ class GenericDataset(data.Dataset):
                 _CIFAR_DATASET_DIR, train=self.split=='train',
                 download=True, transform=self.transform)
         
-        elif self.dataset_name == 'Imagenette':
+        elif self.dataset_name == 'imagenette':
             self.mean_pix = [0.485, 0.456, 0.406]
             self.std_pix = [0.229, 0.224, 0.225]
 
