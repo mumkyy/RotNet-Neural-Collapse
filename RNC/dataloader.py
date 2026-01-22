@@ -204,9 +204,9 @@ class GenericDataset(data.Dataset):
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x).copy(),
                     ]
-            self.transform = transforms.Compose(transforms_list)
-            split_data_dir = _IMAGENETTE_DATASET_DIR + '/' + self.split
-            self.data = datasets.ImageFolder(split_data_dir, self.transform)
+            self.data = datasets.__dict__[self.dataset_name.upper()](
+                _IMAGENETTE_DATASET_DIR, train=self.split=='train',
+                download=True, transform=self.transform)
         
         else:
             raise ValueError('Not recognized dataset {0}'.format(self.dataset_name))
