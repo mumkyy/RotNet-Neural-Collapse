@@ -515,7 +515,7 @@ class DataLoader(object):
                 # Imagenette single-rotation path returns (B,C,H,W) already.
                 if getattr(self.dataset, "dataset_name", "") == "imagenette" \
                 and getattr(self.dataset, "pretext_mode", "rotation") == "rotation":
-                    return batch
+                    return default_collate(batch)
 
                 batch = default_collate(batch)
                 assert(len(batch)==2)
