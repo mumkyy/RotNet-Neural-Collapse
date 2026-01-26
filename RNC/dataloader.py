@@ -493,13 +493,13 @@ class DataLoader(object):
 
                     return jigsaw_tensor, label_tensor
                 
-                if getattr(self.dataset, "dataset_name", "") == "imagenette":
-                    rot = random.choice([0, 90, 180, 270])
-                    rot_label = {0: 0, 90: 1, 180: 2, 270: 3}[rot]
-                    img_r = img0 if rot == 0 else rotate_img(img0, rot)
-                    x = self.transform(img_r)
-                    y = torch.tensor(rot_label, dtype=torch.long)
-                    return x, y
+                # if getattr(self.dataset, "dataset_name", "") == "imagenette":
+                #     rot = random.choice([0, 90, 180, 270])
+                #     rot_label = {0: 0, 90: 1, 180: 2, 270: 3}[rot]
+                #     img_r = img0 if rot == 0 else rotate_img(img0, rot)
+                #     x = self.transform(img_r)
+                #     y = torch.tensor(rot_label, dtype=torch.long)
+                #     return x, y
 
                 rotated_imgs = [
                     self.transform(img0),
@@ -510,19 +510,27 @@ class DataLoader(object):
                 rotation_labels = torch.LongTensor([0, 1, 2, 3])
                 return torch.stack(rotated_imgs, dim=0), rotation_labels
             
-            def _collate_fun(batch):
+            # def _collate_fun(batch):
                 
-                # Imagenette single-rotation path returns (B,C,H,W) already.
-                if getattr(self.dataset, "dataset_name", "") == "imagenette" \
-                and getattr(self.dataset, "pretext_mode", "rotation") == "rotation":
-                    return default_collate(batch)
+            #     # Imagenette single-rotation path returns (B,C,H,W) already.
+            #     if getattr(self.dataset, "dataset_name", "") == "imagenette" \
+            #     and getattr(self.dataset, "pretext_mode", "rotation") == "rotation":
+            #         return default_collate(batch)
 
+            #     batch = default_collate(batch)
+            #     assert(len(batch)==2)
+            #     batch_size, rotations, channels, height, width = batch[0].size()
+            #     batch[0] = batch[0].view([batch_size*rotations, channels, height, width])
+            #     batch[1] = batch[1].view([batch_size*rotations])
+            #     return batch
+            
+            def _collate_fun(batch):
                 batch = default_collate(batch)
-                assert(len(batch)==2)
-                batch_size, rotations, channels, height, width = batch[0].size()
-                batch[0] = batch[0].view([batch_size*rotations, channels, height, width])
-                batch[1] = batch[1].view([batch_size*rotations])
-                return batch
+                x, y = batch  # x: (B, R, C, H, W), y: (B, R)
+                B, R, C, H, W = x.size()
+                x = x.view(B * R, C, H, W)
+                y = y.view(B * R)
+                return x, y
         else: # supervised mode
             # if in supervised mode define a loader function that given the
             # index of an image it returns the image and its categorical label
@@ -532,6 +540,8 @@ class DataLoader(object):
                 img = self.transform(img)
                 return img, categorical_label
             _collate_fun = default_collate
+
+
 
         tnt_dataset = tnt.dataset.ListDataset(elem_list=range(self.epoch_size),
             load=_load_function)
