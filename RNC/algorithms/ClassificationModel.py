@@ -89,6 +89,11 @@ class ClassificationModel(Algorithm):
         if isinstance(crit, nn.MSELoss):
             # one-hot encode targets for MSE
             y_oh = F.one_hot(labels_var, num_classes=C).float().to(pred_var.device)
+            if self.opt.get('mse_on_probs', False):
+                pred_for_loss = torch.softmax(pred_var, dim=1)
+            else:
+                pred_for_loss = pred_var
+
             loss_total = crit(pred_var, y_oh)
         else:
             loss_total = crit(pred_var, labels_var)

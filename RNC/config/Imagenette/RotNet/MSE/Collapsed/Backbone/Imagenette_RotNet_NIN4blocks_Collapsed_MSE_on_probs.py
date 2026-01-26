@@ -35,5 +35,6 @@ config['networks'] = networks
 
 criterions = {}
 criterions['loss'] = {'ctype':'MSELoss', 'opt':None}
+config['mse_on_probs'] = True
 config['criterions'] = criterions
 config['algorithm_type'] = 'ClassificationModel'
