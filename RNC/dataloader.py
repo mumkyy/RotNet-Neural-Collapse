@@ -458,7 +458,7 @@ class DataLoader(object):
                 #         pA = transform(pA)
                 #         pB = transform(pB)
 
-                #     # 4) stack for model input
+                #     # 4) stack for model inpute
                 #     pair = torch.stack([pA, pB], dim=0)  # (2, C, H/2, W/2)
                 #     label = torch.tensor(orientation, dtype=torch.long)
 
