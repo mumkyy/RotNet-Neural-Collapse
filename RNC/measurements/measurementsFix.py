@@ -165,6 +165,54 @@ def build_cifar10_pretext_loader(
     return loader
 
 
+# -------------------- Imagenette pretext loader --------------------
+
+def build_generic_pretext_loader(
+    d_name: str,
+    split: str,
+    batch_size: int,
+    workers: int,
+    pretext_mode: str,
+    sigmas: Optional[List[float]],
+    kernel_sizes: Optional[List[int]],
+    patch_jitter: int,
+    color_distort: bool,
+    color_dist_strength: float,
+    shuffle: bool,
+    fixed_perms: Optional[List[Tuple[int, ...]]] = None,
+    
+):
+    """
+    Returns the DataLoader OBJECT.
+    """
+    from dataloader import GenericDataset, DataLoader as RotLoader
+
+    ds = GenericDataset(
+        dataset_name=d_name,
+        split=split,
+        random_sized_crop=False,
+        num_imgs_per_cat=None,
+        pretext_mode=pretext_mode,
+        sigmas=sigmas,
+        kernel_sizes=kernel_sizes,
+        patch_jitter=patch_jitter,
+        color_distort=color_distort,
+        color_dist_strength=color_dist_strength,
+        fixed_perms=fixed_perms,
+    )
+
+    loader = RotLoader(
+        dataset=ds,
+        batch_size=batch_size,
+        unsupervised=True,   # pretext labels
+        epoch_size=None,
+        num_workers=workers,
+        shuffle=shuffle,
+    )
+
+    return loader
+
+
 # -------------------- NC math --------------------
 
 def gapify(feat: torch.Tensor) -> torch.Tensor:
@@ -626,7 +674,7 @@ def parse_args():
     p.add_argument("--stride", type=int, default=10)
 
     # data/pretext
-    p.add_argument("--split", choices=["train", "test"], default="test")
+    p.add_argument("--split", choices=["train", "test", "val"], default="test")
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--workers", type=int, default=4)
 
@@ -639,6 +687,13 @@ def parse_args():
     p.add_argument("--patch-jitter", type=int, default=0)
     p.add_argument("--color-distort", action="store_true")
     p.add_argument("--color-dist-strength", type=float, default=1.0)
+
+    p.add_argument(
+        "--dataset_name_arg",
+        type=str,
+        default=None,
+        help="if you want to use cifar10 do not use this flag, else type in the name of the dataset you want to build"
+    )
 
     # layers to compute NC1 on (use exposed keys like conv1,conv2,conv3,...)
     p.add_argument(
@@ -757,19 +812,37 @@ def main():
     for start_idx in range(len(all_base_perms)):
         candidate_perms = get_set_starting_at(start_idx)
 
-        calib_loader = build_cifar10_pretext_loader(
-            split="test",
-            batch_size=128,
-            workers=0,  # fast, no MP overhead
-            pretext_mode=args.pretext_mode,
-            sigmas=sigmas,
-            kernel_sizes=kernel_sizes,
-            patch_jitter=args.patch_jitter,
-            color_distort=False,
-            color_dist_strength=0.0,
-            shuffle=False,
-            fixed_perms=candidate_perms,
-        )
+        if args.dataset_name_arg is None: 
+            calib_loader = build_cifar10_pretext_loader(
+                split="test",
+                batch_size=128,
+                workers=0,  # fast, no MP overhead
+                pretext_mode=args.pretext_mode,
+                sigmas=sigmas,
+                kernel_sizes=kernel_sizes,
+                patch_jitter=args.patch_jitter,
+                color_distort=False,
+                color_dist_strength=0.0,
+                shuffle=False,
+                fixed_perms=candidate_perms,
+            )
+        else:
+            calib_loader = build_generic_pretext_loader(
+                d_name=args.dataset_name_arg,
+                split="val",
+                batch_size=128,
+                workers=0,  # fast, no MP overhead
+                pretext_mode=args.pretext_mode,
+                sigmas=sigmas,
+                kernel_sizes=kernel_sizes,
+                patch_jitter=args.patch_jitter,
+                color_distort=False,
+                color_dist_strength=0.0,
+                shuffle=False,
+                fixed_perms=candidate_perms,
+
+            )
+
 
         x, y = next(iter(calib_loader(0)))
         x, y = x.to(device), y.to(device)
@@ -797,19 +870,36 @@ def main():
     # ---------------------------------------------------------
     # 3. MAIN METRICS LOOP
     # ---------------------------------------------------------
-    loader = build_cifar10_pretext_loader(
-        split=args.split,
-        batch_size=args.batch_size,
-        workers=args.workers,
-        pretext_mode=args.pretext_mode,
-        sigmas=sigmas,
-        kernel_sizes=kernel_sizes,
-        patch_jitter=args.patch_jitter,
-        color_distort=args.color_distort,
-        color_dist_strength=args.color_dist_strength,
-        shuffle=False,
-        fixed_perms=best_perms,
-    )
+    if args.dataset_name_arg is None: 
+        loader = build_cifar10_pretext_loader(
+            split=args.split,
+            batch_size=args.batch_size,
+            workers=args.workers,
+            pretext_mode=args.pretext_mode,
+            sigmas=sigmas,
+            kernel_sizes=kernel_sizes,
+            patch_jitter=args.patch_jitter,
+            color_distort=args.color_distort,
+            color_dist_strength=args.color_dist_strength,
+            shuffle=False,
+            fixed_perms=best_perms,
+        )
+    else: 
+        loader = build_generic_pretext_loader(
+            d_name=args.dataset_name_arg,
+            split=args.split,
+            batch_size=args.batch_size,
+            workers=args.workers,
+            pretext_mode=args.pretext_mode,
+            sigmas=sigmas,
+            kernel_sizes=kernel_sizes,
+            patch_jitter=args.patch_jitter,
+            color_distort=args.color_distort,
+            color_dist_strength=args.color_dist_strength,
+            shuffle=False,
+            fixed_perms=best_perms,
+
+        )
 
     # validate layer keys exist
     layer_keys = [x.strip() for x in args.layers.split(",") if x.strip()]
