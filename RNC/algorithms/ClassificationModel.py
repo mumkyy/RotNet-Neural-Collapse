@@ -94,7 +94,7 @@ class ClassificationModel(Algorithm):
             else:
                 pred_for_loss = pred_var
 
-            loss_total = crit(pred_var, y_oh)
+            loss_total = crit(pred_for_loss, y_oh)
         else:
             loss_total = crit(pred_var, labels_var)
         loss_cls = loss_total
