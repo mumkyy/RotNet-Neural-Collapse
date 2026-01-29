@@ -33,9 +33,9 @@ networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 
 config['networks'] = networks
 
 config['nc_reg'] = {
-    'layers': ['conv4','conv3','conv2','classifier'],  # which layers to regularize
-    'weights': {'conv4':0.01,'conv3':0.01, 'conv2': 0.01, 'classifier':0.01},
-    'detach_sb': True           # stop grads through Sb to avoid shrinking class means
+    'layers': ['conv2','conv3','conv4','conv5','penult'],
+    'weights': {'conv2':0.005,'conv3':0.005,'conv4':0.01,'conv5':0.01,'penult':0.01},
+    'detach_sb': True
 }
 
 criterions = {}
