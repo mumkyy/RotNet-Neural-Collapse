@@ -155,6 +155,13 @@ class ResNet34_NIN_Style(nn.Module):
 
         return out_feats[0] if len(out_feats) == 1 else out_feats
 
+
+    def get_feature_module(self, name):
+        m = self._feature_name_map[name]
+        if name.startswith("conv") and "." not in name and isinstance(m, nn.Sequential):
+            return list(m.children())[-1]  # last sub-block output
+        return m
+
 def create_model(opt):
     return ResNet34_NIN_Style(opt)
 
