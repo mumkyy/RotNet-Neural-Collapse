@@ -1,4 +1,4 @@
-batch_size   = 64
+batch_size = 32
 
 config = {}
 # set the parameters related to the training and testing set
@@ -29,7 +29,7 @@ net_opt['use_avg_on_conv3'] = False
 
 
 networks = {}
-net_optim_params = {'optim_type': 'sgd', 'lr': 0.008, 'momentum':0.9, 'weight_decay': 1e-4, 'nesterov': True, 'LUT_lr': [(60, 0.008), (120, 0.0016), (160, 0.00032), (200, 0.000064)]}
+net_optim_params = {'optim_type': 'sgd', 'lr': 0.008, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr': [(60, 0.008), (120, 0.0016), (160, 0.00032), (200, 0.000064)]}
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params} 
 config['networks'] = networks
 
