@@ -361,9 +361,50 @@ def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter 
     jig = np.concatenate([top, bot], axis = 0)
     return jig.copy() , label
 
-def dyn_jigsaw(img , perms: List[Tuple[int, int, int, int]] , ways: int , patch_jitter : int, label: Optional[int] = None) -> Tuple[np.ndarray, int] : 
+def nine_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter : int, label: Optional[int] = None) -> Tuple[np.ndarray, int] : 
     #TODO : implement the dynamic jigsaw such that you can enter "ways" i.e. 4 - 9 etc and the image (resized in train data to 256x256) 
-    # can jigsaw in 4 permutations at that split  
+    # can jigsaw in 4 permutations at that split  256^2 =  (4(85^2)+4(85 *86)+(86^2))
+    """
+    Top row:
+    [85x85] | [86x85] | [85x85]
+
+    Middle row:
+    [85x86] | [86x86] | [85x86]
+
+    Bottom row:
+    [85x85] | [86x85] | [85x85]
+
+    The extra pixel is concentrated in the center cell (and its row/column)
+
+    """
+
+
+    img_h, img_w, img_c = img.shape
+
+    n_h , n_w = img_h // 3 , img_w // 3
+    j = int(max(0, patch_jitter))
+    j = min(j, n_h - 1, n_w - 1) 
+    if j > 0: 
+        img_pad = np.pad(img, ((j,j), (j,j), (0,0)), mode ="reflect")
+    else : 
+        img_pad = img
+
+    base_coords = [
+        (0,0), #TL
+        (0,n_w), #TM
+        (0,2*n_w+1), # TR
+
+        (n_h,0), #ML
+        (n_h,n_w), #MM
+        (n_h, 2*n_w+1), # MR
+
+        (2*n_h+1,0), #BL
+        (2*n_h+1,n_w), #BM
+        (2*n_h+1, 2*n_w+1), # BR
+    ]
+    
+
+
     return None
 
 
@@ -441,7 +482,7 @@ class DataLoader(object):
 
 
 
-                if mode == 'jigsaw':
+                if mode == 'jigsaw' or mode == 'jigsaw_9':
                     perms = getattr(self.dataset, "jigsaw_perms", None)
                     if perms is None : 
                         raise RuntimeError("permutations attribute of Jigsaw did not get initialized in Genericdataset")
@@ -458,16 +499,19 @@ class DataLoader(object):
                         img_pil = color_distortion_PIL(img_pil, strength=cd_strength)
                         img0 = np.asarray(img_pil).copy()
 
-                    
-                    jigsaw_image, label = four_way_jigsaw(
-                        img0, perms, patch_jitter=patch_jitter, label=label
-                    )
+                    if mode == 'jigsaw_9': 
+                        jigsaw_image, label = nine_way_jigsaw(
+                            img0, perms, patch_jitter=patch_jitter, label=label
+                        )
+                    else: 
+                        jigsaw_image, label = four_way_jigsaw(
+                            img0, perms, patch_jitter=patch_jitter, label=label
+                        )
 
                     jigsaw_tensor = self.transform(jigsaw_image).unsqueeze(0)
                     label_tensor = torch.LongTensor([label])
 
                     return jigsaw_tensor, label_tensor
-                
                 # if getattr(self.dataset, "dataset_name", "") == "imagenette":
                 #     rot = random.choice([0, 90, 180, 270])
                 #     rot_label = {0: 0, 90: 1, 180: 2, 270: 3}[rot]
