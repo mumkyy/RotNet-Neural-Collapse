@@ -361,35 +361,10 @@ def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter 
     jig = np.concatenate([top, bot], axis = 0)
     return jig.copy() , label
 
-#IGNORE THIS IMPLEMENTED IN CONTEXT-PRED
-
-# #TODO: figure out how to concatenate output tensors and how should be fed into model
-# #THIS IS THE LOGIC FOR THE QUADRANTS PRETEXT TASK 
-# def get_quadrants(img):
-#     # img: (C, H, W)
-#     C, H, W = img.shape
-#     assert H % 2 == 0 and W % 2 == 0, "H and W must be even."
-#     mid_H, mid_W = H // 2, W // 2
-#     TL = img[:, :mid_H, :mid_W]
-#     TR = img[:, :mid_H,  mid_W:]
-#     BL = img[:,  mid_H:, :mid_W]
-#     BR = img[:,  mid_H:,  mid_W:]
-#     return TL, TR, BL, BR
-
-# ORIENT_MAP = {
-#     0: ("TL", "TR"),  # side-to-side top
-#     1: ("BL", "BR"),  # side-to-side bottom
-#     2: ("TL", "BL"),  # left column
-#     3: ("TR", "BR"),  # right column
-#     4: ("TR", "BL"),  # diag 1
-#     5: ("TL", "BR"),  # diag 2
-# }
-# def sample_pair_by_orientation(img, orientation):
-    
-#     TL, TR, BL, BR = get_quadrants(img)
-#     name2patch = {"TL": TL, "TR": TR, "BL": BL, "BR": BR}
-#     a_name, b_name = ORIENT_MAP[orientation]
-#     return name2patch[a_name], name2patch[b_name]
+def dyn_jigsaw(img , perms: List[Tuple[int, int, int, int]] , ways: int , patch_jitter : int, label: Optional[int] = None) -> Tuple[np.ndarray, int] : 
+    #TODO : implement the dynamic jigsaw such that you can enter "ways" i.e. 4 - 9 etc and the image (resized in train data to 256x256) 
+    # can jigsaw in 4 permutations at that split  
+    return None
 
 
 class DataLoader(object):
