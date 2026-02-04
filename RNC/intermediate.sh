@@ -2,62 +2,64 @@
 set -euo pipefail
 
 # Work from project root
-NOT="config/CIFAR10/RotNet/MSE/Not_Collapsed/convclassifier/conv2/CIFAR10_ConvClassifier_on_RotNet_NIN4blocks_Conv2_feats_Not_Collapsed_MSE_NC1_Reg_Detach.py"
-
-convs=(1 2 3 4)
-
-blocks=(
-  "ConvB1"
-  "ConvB2"
-  "ConvB3"
+variants=(
+  "Not_Collapsed|config/Imagenette/jigsaw/MSE/Not_Collapsed/conv2/Imagenette_ConvClassifier_on_Jigsaw_four_classes_jitter_colordist_resnet_conv2_feats_Not_Collapsed_MSE.py"
+  "Collapsed|config/Imagenette/jigsaw/MSE/Collapsed/conv2/Imagenette_ConvClassifier_on_Jigsaw_four_classes_jitter_colordist_resnet_conv2_feats_Collapsed_MSE.py"
 )
 
-special=(
-  "MaxPool"
-  "AvgPool"
-  ""
-  ""
+# ResNet34_NIN_Style feature keys (see architectures/Resnet.py)
+hooks=(
+  "conv1.Stem_Conv"
+  "conv1.Stem_BN"
+  "conv1.Stem_ReLU"
+  "conv1.Stem_MaxPool"
 )
 
-hooks=()
-count=0
-
-for conv in "${convs[@]}"; do
-  for block in "${blocks[@]}"; do
-    hooks+=("conv${conv}.Block${conv}_${block}")
-  done
-
-  sp="${special[$count]}"
-  if [[ -n "$sp" ]]; then
-    hooks+=("conv${conv}.Block${conv}_${sp}")
-  fi
-
-  ((count+=1))
+for i in 0 1 2; do
+  hooks+=("conv2.block${i}")
 done
 
+for i in 0 1 2 3; do
+  hooks+=("conv3.block${i}")
+done
 
+for i in 0 1 2 3 4 5; do
+  hooks+=("conv4.block${i}")
+done
 
-for i in "${!hooks[@]}"; do
-  hook="${hooks[$i]}"
+for i in 0 1 2; do
+  hooks+=("conv5.block${i}")
+done
 
-  subdir="${hook%%.*}"
+declare -A channels=(
+  [conv1]=64
+  [conv2]=64
+  [conv3]=128
+  [conv4]=256
+  [conv5]=512
+)
 
-  # not collapsed config 
-  NOT_OUT="config/CIFAR10/RotNet/MSE/Not_Collapsed/convclassifier/${subdir}/"
-  NOT_EXP="${NOT_OUT}CIFAR10_ConvClassifier_on_RotNet_NIN4blocks_${hook}_feats_Not_Collapsed_MSE_NC1_Reg_Detach.py"
+for variant in "${variants[@]}"; do
+  IFS="|" read -r label base <<< "$variant"
 
+  for hook in "${hooks[@]}"; do
+    subdir="${hook%%.*}"
+    ch="${channels[$subdir]:-}"
 
-  cp -p "$NOT" "$NOT_EXP"
+    if [[ -z "$ch" ]]; then
+      echo "Unknown stage for hook: $hook" >&2
+      exit 1
+    fi
 
-  sed -E -i "s|^config\\['out_feat_keys'\\][[:space:]]*=.*|config['out_feat_keys'] = ['${hook}']|" "$NOT_EXP"
+    OUT_DIR="config/Imagenette/jigsaw/MSE/${label}/${subdir}/"
+    OUT_FILE="${OUT_DIR}Imagenette_ConvClassifier_on_Jigsaw_four_classes_jitter_colordist_resnet_${hook}_feats_${label}_MSE.py"
 
-  if [[ "$hook" == conv1.Block1_ConvB2* ]]; then
-    sed -E -i "s|(\['nChannels'\][[:space:]]*=[[:space:]]*)[0-9]+|\1160|" "$NOT_EXP"
-  elif [[ "$hook" == conv1.Block1_ConvB3* || "$hook" == conv1.Block1_MaxPool* ]]; then
-    sed -E -i "s|(\['nChannels'\][[:space:]]*=[[:space:]]*)[0-9]+|\196|" "$NOT_EXP"
-  else
-    sed -E -i "s|(\['nChannels'\][[:space:]]*=[[:space:]]*)[0-9]+|\1192|" "$NOT_EXP"
-  fi
+    mkdir -p "$OUT_DIR"
+    cp -p "$base" "$OUT_FILE"
 
-  echo "Wrote $NOT_EXP"
+    sed -E -i "s|^config\\['out_feat_keys'\\][[:space:]]*=.*|config['out_feat_keys'] = ['${hook}']|" "$OUT_FILE"
+    sed -E -i "s|([\"']nChannels[\"'][[:space:]]*:[[:space:]]*)[0-9]+|\\1${ch}|" "$OUT_FILE"
+
+    echo "Wrote $OUT_FILE"
+  done
 done
