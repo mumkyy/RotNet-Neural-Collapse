@@ -48,15 +48,18 @@ def main():
         split=data_train_opt['split'],
         random_sized_crop=data_train_opt['random_sized_crop'],
         num_imgs_per_cat=num_imgs_per_cat,
-        fixed_perms=global_perms)
-        
-        
-    
+        pretext_mode=data_train_opt.get('pretext_mode', 'rotation'),  
+        fixed_perms=global_perms
+    )
+
     dataset_test = GenericDataset(
         dataset_name=data_test_opt['dataset_name'],
         split=data_test_opt['split'],
         random_sized_crop=data_test_opt['random_sized_crop'],
-        fixed_perms=global_perms)
+        pretext_mode=data_test_opt.get('pretext_mode', 'rotation'),   
+        fixed_perms=global_perms
+    )
+
     
     # Set pretext parameters only for unsupervised (backbone training)
 
