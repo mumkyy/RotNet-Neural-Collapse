@@ -364,13 +364,13 @@ def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter 
 def nine_way_jigsaw(img, perms, patch_jitter: int, label: Optional[int] = None):
     H, W, C = img.shape
 
-    y_edges = np.linspace(0, H, 4, dtype=int)  # 0, y1, y2, H
-    x_edges = np.linspace(0, W, 4, dtype=int)  # 0, x1, x2, W
+    y_edges = np.linspace(0, H, 4, dtype=int)
+    x_edges = np.linspace(0, W, 4, dtype=int)
 
-    patch_heights = [y_edges[r+1] - y_edges[r] for r in range(3)]
-    patch_widths  = [x_edges[c+1] - x_edges[c] for c in range(3)]
-    min_ph = min(patch_heights)
-    min_pw = min(patch_widths)
+    # cell sizes
+    phs = [y_edges[r+1] - y_edges[r] for r in range(3)]
+    pws = [x_edges[c+1] - x_edges[c] for c in range(3)]
+    min_ph, min_pw = min(phs), min(pws)
 
     j = int(max(0, patch_jitter))
     j = min(j, min_ph - 1, min_pw - 1)
@@ -384,13 +384,35 @@ def nine_way_jigsaw(img, perms, patch_jitter: int, label: Optional[int] = None):
             x0, x1 = x_edges[c], x_edges[c+1]
             ph, pw = (y1 - y0), (x1 - x0)
 
-            dy = random.randint(-j, j) if j > 0 else 0
-            dx = random.randint(-j, j) if j > 0 else 0
+            # Base top-left in padded coords
+            base_y = y0 + j
+            base_x = x0 + j
 
-            ys = y0 + dy + j
-            xs = x0 + dx + j
+            if j > 0:
+                # Clamp jitter so patch stays within THIS cell region (in padded coords)
+                # Cell region in padded coords is [y0+j, y1+j) and [x0+j, x1+j)
+                # Top-left must be in [cell_start, cell_end - patch_size]
+                y_min = y0 + j
+                y_max = y1 + j - ph
+                x_min = x0 + j
+                x_max = x1 + j - pw
+
+                # Note: y_max/y_min can be equal (e.g. no slack); randint needs range
+                dy_low  = max(-j, y_min - base_y)
+                dy_high = min( j, y_max - base_y)
+                dx_low  = max(-j, x_min - base_x)
+                dx_high = min( j, x_max - base_x)
+
+                dy = random.randint(dy_low, dy_high) if dy_low <= dy_high else 0
+                dx = random.randint(dx_low, dx_high) if dx_low <= dx_high else 0
+            else:
+                dy = dx = 0
+
+            ys = base_y + dy
+            xs = base_x + dx
+
             patch = img_pad[ys:ys+ph, xs:xs+pw, :]
-            assert patch.shape[:2] == (ph, pw), patch.shape
+            assert patch.shape[:2] == (ph, pw), (patch.shape, (ph, pw), (r, c))
             patches.append(patch)
 
     label = random.randrange(len(perms)) if label is None else int(label) % len(perms)
@@ -398,6 +420,7 @@ def nine_way_jigsaw(img, perms, patch_jitter: int, label: Optional[int] = None):
     if len(perm) != 9:
         raise ValueError(f"Expected perm length 9, got {len(perm)}")
 
+    # helper to concat a row safely (heights must match now)
     row1 = np.concatenate([patches[perm[0]], patches[perm[1]], patches[perm[2]]], axis=1)
     row2 = np.concatenate([patches[perm[3]], patches[perm[4]], patches[perm[5]]], axis=1)
     row3 = np.concatenate([patches[perm[6]], patches[perm[7]], patches[perm[8]]], axis=1)
