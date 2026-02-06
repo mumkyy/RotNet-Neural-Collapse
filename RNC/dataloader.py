@@ -361,51 +361,52 @@ def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter 
     jig = np.concatenate([top, bot], axis = 0)
     return jig.copy() , label
 
-def nine_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter : int, label: Optional[int] = None) -> Tuple[np.ndarray, int] : 
-    #TODO : implement the dynamic jigsaw such that you can enter "ways" i.e. 4 - 9 etc and the image (resized in train data to 256x256) 
-    # can jigsaw in 4 permutations at that split  256^2 =  (4(85^2)+4(85 *86)+(86^2))
-    """
-    Top row:
-    [85x85] | [86x85] | [85x85]
+def nine_way_jigsaw(img, perms, patch_jitter: int, label: Optional[int] = None):
+    H, W, C = img.shape
 
-    Middle row:
-    [85x86] | [86x86] | [85x86]
+    y_edges = np.linspace(0, H, 4, dtype=int)  # 0, y1, y2, H
+    x_edges = np.linspace(0, W, 4, dtype=int)  # 0, x1, x2, W
 
-    Bottom row:
-    [85x85] | [86x85] | [85x85]
+    patch_heights = [y_edges[r+1] - y_edges[r] for r in range(3)]
+    patch_widths  = [x_edges[c+1] - x_edges[c] for c in range(3)]
+    min_ph = min(patch_heights)
+    min_pw = min(patch_widths)
 
-    The extra pixel is concentrated in the center cell (and its row/column)
-
-    """
-
-
-    img_h, img_w, img_c = img.shape
-
-    n_h , n_w = img_h // 3 , img_w // 3
     j = int(max(0, patch_jitter))
-    j = min(j, n_h - 1, n_w - 1) 
-    if j > 0: 
-        img_pad = np.pad(img, ((j,j), (j,j), (0,0)), mode ="reflect")
-    else : 
-        img_pad = img
+    j = min(j, min_ph - 1, min_pw - 1)
 
-    base_coords = [
-        (0,0), #TL
-        (0,n_w), #TM
-        (0,2*n_w+1), # TR
+    img_pad = np.pad(img, ((j, j), (j, j), (0, 0)), mode="reflect") if j > 0 else img
 
-        (n_h,0), #ML
-        (n_h,n_w), #MM
-        (n_h, 2*n_w+1), # MR
+    patches = []
+    for r in range(3):
+        for c in range(3):
+            y0, y1 = y_edges[r], y_edges[r+1]
+            x0, x1 = x_edges[c], x_edges[c+1]
+            ph, pw = (y1 - y0), (x1 - x0)
 
-        (2*n_h+1,0), #BL
-        (2*n_h+1,n_w), #BM
-        (2*n_h+1, 2*n_w+1), # BR
-    ]
-    
+            dy = random.randint(-j, j) if j > 0 else 0
+            dx = random.randint(-j, j) if j > 0 else 0
+
+            ys = y0 + dy + j
+            xs = x0 + dx + j
+            patch = img_pad[ys:ys+ph, xs:xs+pw, :]
+            assert patch.shape[:2] == (ph, pw), patch.shape
+            patches.append(patch)
+
+    label = random.randrange(len(perms)) if label is None else int(label) % len(perms)
+    perm = perms[label]
+    if len(perm) != 9:
+        raise ValueError(f"Expected perm length 9, got {len(perm)}")
+
+    row1 = np.concatenate([patches[perm[0]], patches[perm[1]], patches[perm[2]]], axis=1)
+    row2 = np.concatenate([patches[perm[3]], patches[perm[4]], patches[perm[5]]], axis=1)
+    row3 = np.concatenate([patches[perm[6]], patches[perm[7]], patches[perm[8]]], axis=1)
+
+    jig = np.concatenate([row1, row2, row3], axis=0)
+    assert jig.shape[:2] == (H, W), jig.shape
+    return jig.copy(), label
 
 
-    return None
 
 
 class DataLoader(object):
@@ -490,10 +491,10 @@ class DataLoader(object):
                     patch_jitter = int(getattr(self.dataset, "patch_jitter", 0))
                     cd_strength = float(getattr(self.dataset, "color_dist_strength", 1.0))
                     cd_enable = bool (getattr(self.dataset, "color_distort", False))
-                    if getattr(self.dataset, "split", "").lower() == "test":
+                    if getattr(self.dataset, "split", "").lower() in ("val", "test"):
                         label = idx % len(perms)
                     else:
-                        label = None  # lets four_way_jigsaw pick random
+                        label = None  # ts four_way_jigsaw pick random
                     if cd_enable: 
                         img_pil = Image.fromarray(img0)
                         img_pil = color_distortion_PIL(img_pil, strength=cd_strength)

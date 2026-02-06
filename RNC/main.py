@@ -37,7 +37,10 @@ def main():
     data_test_opt = config['data_test_opt']
     num_imgs_per_cat = data_train_opt['num_imgs_per_cat'] if ('num_imgs_per_cat' in data_train_opt) else None
     from maxHamming import generate_maximal_hamming_distance_set
-    global_perms_1based = generate_maximal_hamming_distance_set(4, K=4)
+    if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw_9':
+        global_perms_1based = generate_maximal_hamming_distance_set(4, K=9)
+    else: 
+        global_perms_1based = generate_maximal_hamming_distance_set(4, K=4)
     global_perms = [tuple(x-1 for x in p) for p in global_perms_1based]
 
     dataset_train = GenericDataset(
@@ -76,7 +79,7 @@ def main():
         dataset_test.color_dist_strength = data_test_opt.get("color_dist_strength", 1.0)
     
     # Auto-set classification head size for jigsaw
-    if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw':
+    if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw' or data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw_9':
         config['networks']['model']['opt']['num_classes'] = len(dataset_train.jigsaw_perms)
         print("Jigsaw classes =", config['networks']['model']['opt']['num_classes'])
 
