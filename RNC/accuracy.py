@@ -48,6 +48,14 @@ def report_file(path):
     best_val   = best_entry(val_acc)
     return best_train, best_val
 
+def report_file_last_epoch(path):
+    train_acc, val_acc = parse_log(path)
+    if not train_acc or not val_acc:
+        return None, None
+    train = train_acc[-1]
+    val   = val_acc[-1]
+    return train, val
+
 def summarize(values, label):
     if not values:
         print(f"No {label} values found.")
@@ -99,6 +107,11 @@ def main():
         help="Category keywords to group by (e.g. --categories NIN4blocks conv2 conv4). "
             "Shows best performer in each category."
     )
+    parser.add_argument(
+        "--last-epoch",
+        action="store_true",
+        help="use values at last_epoch instead of best"
+    )
     args = parser.parse_args()
 
     p = Path(args.path)
@@ -120,21 +133,27 @@ def main():
     # Always list best-per-file first (unless quiet), and cache results
     per_file_results = {}
     for f in files:
-        per_file_results[f] = report_file(f)
+        if args.last_epoch:
+            per_file_results[f] = report_file_last_epoch(f)
+        else:
+            per_file_results[f] = report_file(f)
+
+    
+    value = "Last" if args.last_epoch else "Best"
 
     if not args.quiet:
-        print(f"Found {len(files)} file(s). Reporting best per file:\n")
+        print(f"Found {len(files)} file(s). Reporting {value} per file:\n")
         for f in files:
             best_train, best_val = per_file_results[f]
             print(f"[{f}]")
             if best_train:
                 tepoch, tacc = best_train
-                print(f"  Best training top-1 = {tacc:.4f}% at epoch {tepoch}")
+                print(f"  {value} training top-1 = {tacc:.4f}% at epoch {tepoch}")
             else:
                 print("  No training entries found.")
             if best_val:
                 vepoch, vacc = best_val
-                print(f"  Best validation top-1 = {vacc:.4f}% at epoch {vepoch}")
+                print(f"  {value} validation top-1 = {vacc:.4f}% at epoch {vepoch}")
             else:
                 print("  No validation entries found.")
             print()
@@ -174,7 +193,7 @@ def main():
             
             if best_file:
                 f, best_train, best_val = best_file
-                print(f"Best performer: {f}")
+                print(f"{value} performer: {f}")
                 if best_train:
                     print(f"  Training top-1 = {best_train[1]:.4f}% at epoch {best_train[0]}")
                 if best_val:
