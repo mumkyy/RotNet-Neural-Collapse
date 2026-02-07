@@ -182,25 +182,27 @@ class GenericDataset(data.Dataset):
         
         elif self.dataset_name == 'imagenette':
             self.mean_pix = [0.485, 0.456, 0.406]
-            self.std_pix = [0.229, 0.224, 0.225]
+            self.std_pix  = [0.229, 0.224, 0.225]
+
+            crop_sz = 225 if self.pretext_mode == 'jigsaw_9' else 224
 
             if self.split != 'train':
                 transforms_list = [
                     transforms.Resize(256),
-                    transforms.CenterCrop(224),
+                    transforms.CenterCrop(crop_sz),
                     lambda x: np.asarray(x).copy(),
                 ]
             else:
                 if self.random_sized_crop:
                     transforms_list = [
-                        transforms.RandomResizedCrop(224),
+                        transforms.RandomResizedCrop(crop_sz),
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x).copy(),
                     ]
                 else:
                     transforms_list = [
                         transforms.Resize(256),
-                        transforms.RandomCrop(224),
+                        transforms.RandomCrop(crop_sz),
                         transforms.RandomHorizontalFlip(),
                         lambda x: np.asarray(x).copy(),
                     ]
@@ -361,51 +363,75 @@ def four_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter 
     jig = np.concatenate([top, bot], axis = 0)
     return jig.copy() , label
 
-def nine_way_jigsaw(img , perms: List[Tuple[int, int, int, int]] , patch_jitter : int, label: Optional[int] = None) -> Tuple[np.ndarray, int] : 
-    #TODO : implement the dynamic jigsaw such that you can enter "ways" i.e. 4 - 9 etc and the image (resized in train data to 256x256) 
-    # can jigsaw in 4 permutations at that split  256^2 =  (4(85^2)+4(85 *86)+(86^2))
-    """
-    Top row:
-    [85x85] | [86x85] | [85x85]
+def nine_way_jigsaw(img, perms, patch_jitter: int, label: Optional[int] = None):
+    H, W, C = img.shape
 
-    Middle row:
-    [85x86] | [86x86] | [85x86]
+    y_edges = np.linspace(0, H, 4, dtype=int)
+    x_edges = np.linspace(0, W, 4, dtype=int)
 
-    Bottom row:
-    [85x85] | [86x85] | [85x85]
+    # cell sizes
+    phs = [y_edges[r+1] - y_edges[r] for r in range(3)]
+    pws = [x_edges[c+1] - x_edges[c] for c in range(3)]
+    min_ph, min_pw = min(phs), min(pws)
 
-    The extra pixel is concentrated in the center cell (and its row/column)
-
-    """
-
-
-    img_h, img_w, img_c = img.shape
-
-    n_h , n_w = img_h // 3 , img_w // 3
     j = int(max(0, patch_jitter))
-    j = min(j, n_h - 1, n_w - 1) 
-    if j > 0: 
-        img_pad = np.pad(img, ((j,j), (j,j), (0,0)), mode ="reflect")
-    else : 
-        img_pad = img
+    j = min(j, min_ph - 1, min_pw - 1)
 
-    base_coords = [
-        (0,0), #TL
-        (0,n_w), #TM
-        (0,2*n_w+1), # TR
+    img_pad = np.pad(img, ((j, j), (j, j), (0, 0)), mode="reflect") if j > 0 else img
 
-        (n_h,0), #ML
-        (n_h,n_w), #MM
-        (n_h, 2*n_w+1), # MR
+    patches = []
+    for r in range(3):
+        for c in range(3):
+            y0, y1 = y_edges[r], y_edges[r+1]
+            x0, x1 = x_edges[c], x_edges[c+1]
+            ph, pw = (y1 - y0), (x1 - x0)
 
-        (2*n_h+1,0), #BL
-        (2*n_h+1,n_w), #BM
-        (2*n_h+1, 2*n_w+1), # BR
-    ]
-    
+            # Base top-left in padded coords
+            base_y = y0 + j
+            base_x = x0 + j
+
+            if j > 0:
+                # Clamp jitter so patch stays within THIS cell region (in padded coords)
+                # Cell region in padded coords is [y0+j, y1+j) and [x0+j, x1+j)
+                # Top-left must be in [cell_start, cell_end - patch_size]
+                y_min = y0 + j
+                y_max = y1 + j - ph
+                x_min = x0 + j
+                x_max = x1 + j - pw
+
+                # Note: y_max/y_min can be equal (e.g. no slack); randint needs range
+                dy_low  = max(-j, y_min - base_y)
+                dy_high = min( j, y_max - base_y)
+                dx_low  = max(-j, x_min - base_x)
+                dx_high = min( j, x_max - base_x)
+
+                dy = random.randint(dy_low, dy_high) if dy_low <= dy_high else 0
+                dx = random.randint(dx_low, dx_high) if dx_low <= dx_high else 0
+            else:
+                dy = dx = 0
+
+            ys = base_y + dy
+            xs = base_x + dx
+
+            patch = img_pad[ys:ys+ph, xs:xs+pw, :]
+            assert patch.shape[:2] == (ph, pw), (patch.shape, (ph, pw), (r, c))
+            patches.append(patch)
+
+    label = random.randrange(len(perms)) if label is None else int(label) % len(perms)
+    perm = perms[label]
+    if len(perm) != 9:
+        raise ValueError(f"Expected perm length 9, got {len(perm)}")
+
+    # helper to concat a row safely (heights must match now)
+    row1 = np.concatenate([patches[perm[0]], patches[perm[1]], patches[perm[2]]], axis=1)
+    row2 = np.concatenate([patches[perm[3]], patches[perm[4]], patches[perm[5]]], axis=1)
+    row3 = np.concatenate([patches[perm[6]], patches[perm[7]], patches[perm[8]]], axis=1)
+
+    jig = np.concatenate([row1, row2, row3], axis=0)
+    assert jig.shape[:2] == (H, W), jig.shape
+    return jig.copy(), label
 
 
-    return None
 
 
 class DataLoader(object):
@@ -490,10 +516,10 @@ class DataLoader(object):
                     patch_jitter = int(getattr(self.dataset, "patch_jitter", 0))
                     cd_strength = float(getattr(self.dataset, "color_dist_strength", 1.0))
                     cd_enable = bool (getattr(self.dataset, "color_distort", False))
-                    if getattr(self.dataset, "split", "").lower() == "test":
+                    if getattr(self.dataset, "split", "").lower() in ("val", "test"):
                         label = idx % len(perms)
                     else:
-                        label = None  # lets four_way_jigsaw pick random
+                        label = None  # ts four_way_jigsaw pick random
                     if cd_enable: 
                         img_pil = Image.fromarray(img0)
                         img_pil = color_distortion_PIL(img_pil, strength=cd_strength)

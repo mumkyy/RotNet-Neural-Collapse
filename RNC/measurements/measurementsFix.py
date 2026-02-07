@@ -678,7 +678,7 @@ def parse_args():
     p.add_argument("--batch-size", type=int, default=128)
     p.add_argument("--workers", type=int, default=4)
 
-    p.add_argument("--pretext-mode", choices=["rotation", "gaussian_noise", "gaussian_blur", "jigsaw"], required=True)
+    p.add_argument("--pretext-mode", choices=["rotation", "gaussian_noise", "gaussian_blur", "jigsaw", "jigsaw_9"], required=True)
     p.add_argument("--num-classes", type=int, default=4)
 
     p.add_argument("--sigmas", type=str, default=None, help="Comma list (4 entries) for gaussian_noise")
@@ -766,7 +766,10 @@ def main():
     # ---------------------------------------------------------
     # 2. AUTO-DISCOVER PERMUTATIONS
     # ---------------------------------------------------------
-    K = 4  # 2x2 grid
+    k = 4 #2x2 grid
+    if args.pretext_mode == "jigsaw_9":
+        K = 9  # 3x3 grid
+    
     N = args.num_classes
     all_base_perms = list(permutations(range(1, K + 1)))  # 1-based logic from your file
 
@@ -1035,10 +1038,11 @@ def main():
         payload["ncc_acc"] = ncc_acc_curve
     if args.nc4_layerwise:
         payload["nc4_layerwise"] = nc4_layerwise_curves
-
-    with open(out_dir / "metrics.pkl", "wb") as f:
-        pickle.dump(payload, f)
-
+    #instead of a pkl json is easier to parse and will not require a full datastructure reparse as writing to csv would     
+    import json
+    with open(out_dir / "metrics.json", "w") as f:
+        json.dump(payload, f, indent=2)
+    
     # plots
     plot_and_save(out_dir, epochs_logged, {"accuracy": acc_curve, "loss": loss_curve, "nc3": nc3_curve}, "SimpleNIN")
     plot_and_save(out_dir, epochs_logged, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, "SimpleNIN")
