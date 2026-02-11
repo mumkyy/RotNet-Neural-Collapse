@@ -35,6 +35,29 @@ def resolve_pkl(pathlike: str) -> Path:
         print(f"[info] Multiple metrics.pkl found under {p}, using: {candidates[0]}")
     return candidates[0]
 
+def resolve_json(pathlike: str) -> Path:
+    """
+    Accept either:
+      - a direct metrics.json file path
+      - a directory containing metrics.json
+      - a directory tree containing metrics.json somewhere below
+    """
+    p = Path(pathlike)
+    if p.is_file():
+        return p
+
+    direct = p / 'metrics.json'
+    if direct.exists():
+        return direct
+
+    candidates = list(p.rglob('metrics.json'))
+    if not candidates:
+        sys.exit(f"metrics.json not found under: {p}")
+    if len(candidates) > 1:
+        print(f"[info] Multiple metrics.json found under {p}, using: {candidates[0]}")
+    return candidates[0]
+
+
 
 def sel(vals, idx):
     return [vals[i] for i in idx]
@@ -210,8 +233,8 @@ def main():
     out_dir = Path(args.out) / 'plots'
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pklA = resolve_pkl(args.runA)
-    pklB = resolve_pkl(args.runB)
+    pklA = resolve_json(args.runA)
+    pklB = resolve_json(args.runB)
 
     print(f"Loading A: {pklA}")
     with open(pklA, 'rb') as f:
