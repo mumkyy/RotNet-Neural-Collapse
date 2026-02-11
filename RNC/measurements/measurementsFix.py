@@ -757,21 +757,80 @@ def main():
         mx = max(all_epochs)
         epochs = sorted({ep for ep in all_epochs if (ep % args.stride == 0) or (ep == mx)})
 
-    # Load the FIRST epoch in the list just for calibration
-    print(f"\n[Calibration] Loading epoch {epochs[0]} to find correct permutations...")
-    load_state_dict(model, epoch_to_path[epochs[0]])
-    model.to(device)
-    model.eval()
+    # # Load the FIRST epoch in the list just for calibration
+    # print(f"\n[Calibration] Loading epoch {epochs[0]} to find correct permutations...")
+    # load_state_dict(model, epoch_to_path[epochs[0]])
+    # model.to(device)
+    # model.eval()
 
     # ---------------------------------------------------------
     # 2. AUTO-DISCOVER PERMUTATIONS
     # ---------------------------------------------------------
-    k = 4 #2x2 grid
-    if args.pretext_mode == "jigsaw_9":
-        K = 9  # 3x3 grid
+    # k = 4 #2x2 grid
+    # if args.pretext_mode == "jigsaw_9":
+    #     K = 9  # 3x3 grid
     
-    N = args.num_classes
-    all_base_perms = list(permutations(range(1, K + 1)))  # 1-based logic from your file
+    # N = args.num_classes
+    # # all_base_perms = list(permutations(range(1, K + 1)))  
+
+    # sigmas = parse_float_list(args.sigmas)
+    # kernel_sizes = parse_int_list(args.kernel_sizes)
+    # if args.pretext_mode == "gaussian_noise" and sigmas is None:
+    #     sigmas = [1e-3, 1e-2, 1e-1, 1.0]
+    # if args.pretext_mode == "gaussian_blur" and kernel_sizes is None:
+    #     kernel_sizes = [3, 5, 7, 9]
+
+    # best_perms = None
+    # best_acc = -1.0
+
+    # print(f"[Calibration] Testing 24 possible permutation sets...")
+
+    # def get_set_starting_at(start_idx: int) -> List[Tuple[int, ...]]:
+    #     # EXACT logic from your maxHamming.py, but j is forced
+    #     P_bar = all_base_perms.copy()
+    #     P: List[Tuple[int, int, int, int]] = []
+    #     j = start_idx  # Forced start
+
+    #     i = 1
+    #     while i <= N:
+    #         P.append(P_bar[j])
+    #         P_prime = P_bar[:j] + P_bar[j + 1 :]
+
+    #         if i < N:
+    #             n_p = len(P)
+    #             n_pp = len(P_prime)
+    #             D = np.zeros((n_p, n_pp), dtype=int)
+    #             for r in range(n_p):
+    #                 for c in range(n_pp):
+    #                     D[r, c] = int(np.sum(np.array(P[r]) != np.array(P_prime[c])))
+
+    #             D_bar = np.min(D, axis=0)
+    #             j = int(np.argmax(D_bar))
+
+    #         P_bar = P_prime
+    #         i += 1
+
+    #     return [tuple(x - 1 for x in p) for p in P]  # 0-based for loader
+
+    # for start_idx in range(len(all_base_perms)):
+    #     candidate_perms = get_set_starting_at(start_idx)
+    def get_training_jigsaw_perms(pretext_mode: str, num_classes: int) -> Optional[List[Tuple[int, ...]]]:
+        """
+        Match the training script exactly:
+        - jigsaw:   generate_maximal_hamming_distance_set(N, K=4)
+        - jigsaw_9: generate_maximal_hamming_distance_set(N, K=9)
+        Returns 0-based perms list, or None if not a jigsaw mode.
+        """
+        if pretext_mode not in ("jigsaw", "jigsaw_9"):
+            return None
+
+        from maxHamming import generate_maximal_hamming_distance_set
+        K = 9 if pretext_mode == "jigsaw_9" else 4
+
+        perms_1based = generate_maximal_hamming_distance_set(num_classes, K=K)
+        perms_0based = [tuple(x - 1 for x in p) for p in perms_1based]
+        return perms_0based
+
 
     sigmas = parse_float_list(args.sigmas)
     kernel_sizes = parse_int_list(args.kernel_sizes)
@@ -780,95 +839,42 @@ def main():
     if args.pretext_mode == "gaussian_blur" and kernel_sizes is None:
         kernel_sizes = [3, 5, 7, 9]
 
-    best_perms = None
-    best_acc = -1.0
+    best_perms = get_training_jigsaw_perms(args.pretext_mode, args.num_classes)
 
-    print(f"[Calibration] Testing 24 possible permutation sets...")
-
-    def get_set_starting_at(start_idx: int) -> List[Tuple[int, ...]]:
-        # EXACT logic from your maxHamming.py, but j is forced
-        P_bar = all_base_perms.copy()
-        P: List[Tuple[int, int, int, int]] = []
-        j = start_idx  # Forced start
-
-        i = 1
-        while i <= N:
-            P.append(P_bar[j])
-            P_prime = P_bar[:j] + P_bar[j + 1 :]
-
-            if i < N:
-                n_p = len(P)
-                n_pp = len(P_prime)
-                D = np.zeros((n_p, n_pp), dtype=int)
-                for r in range(n_p):
-                    for c in range(n_pp):
-                        D[r, c] = int(np.sum(np.array(P[r]) != np.array(P_prime[c])))
-
-                D_bar = np.min(D, axis=0)
-                j = int(np.argmax(D_bar))
-
-            P_bar = P_prime
-            i += 1
-
-        return [tuple(x - 1 for x in p) for p in P]  # 0-based for loader
-
-    for start_idx in range(len(all_base_perms)):
-        candidate_perms = get_set_starting_at(start_idx)
-
-        if args.dataset_name_arg is None: 
-            calib_loader = build_cifar10_pretext_loader(
-                split="test",
-                batch_size=128,
-                workers=0,  # fast, no MP overhead
-                pretext_mode=args.pretext_mode,
-                sigmas=sigmas,
-                kernel_sizes=kernel_sizes,
-                patch_jitter=args.patch_jitter,
-                color_distort=False,
-                color_dist_strength=0.0,
-                shuffle=False,
-                fixed_perms=candidate_perms,
-            )
-        else:
-            calib_loader = build_generic_pretext_loader(
-                d_name=args.dataset_name_arg,
-                split="val",
-                batch_size=128,
-                workers=0,  # fast, no MP overhead
-                pretext_mode=args.pretext_mode,
-                sigmas=sigmas,
-                kernel_sizes=kernel_sizes,
-                patch_jitter=args.patch_jitter,
-                color_distort=False,
-                color_dist_strength=0.0,
-                shuffle=False,
-                fixed_perms=candidate_perms,
-
-            )
-
-
-        x, y = next(iter(calib_loader(0)))
-        x, y = x.to(device), y.to(device)
-        with torch.no_grad():
-            out_raw = model(x)
-            logits = out_raw[-1] if isinstance(out_raw, (list, tuple)) else out_raw
-            acc = (logits.argmax(1) == y).float().mean().item()
-
-        if acc > best_acc:
-            best_acc = acc
-            best_perms = candidate_perms
-
-        if best_acc > 0.90:
-            print(f"[Calibration] Found match at index {start_idx}! Acc: {best_acc:.2%}")
-            break
-
-    if best_acc < 0.5:
-        print(f"\n[WARNING] Best match was only {best_acc:.2%}. Something else might be wrong (e.g. Patch Jitter mismatch).")
+    if args.pretext_mode in ("jigsaw", "jigsaw_9"):
+        if best_perms is None:
+            raise RuntimeError("Failed to build training-time jigsaw perms.")
+        print(f"[Perms] Using training-time maxHamming perms: "
+            f"mode={args.pretext_mode} N={args.num_classes} "
+            f"K={9 if args.pretext_mode=='jigsaw_9' else 4} "
+            f"-> {len(best_perms)} classes")
     else:
-        print(f"[Calibration] Locked in permutation set. Best Acc: {best_acc:.2%}")
+        print(f"[Perms] Non-jigsaw mode={args.pretext_mode}; no perms needed.")
+        best_perms = None
 
-    if best_perms is None:
-        raise RuntimeError("Calibration failed to determine best_perms (unexpected).")
+
+    #     x, y = next(iter(calib_loader(0)))
+    #     x, y = x.to(device), y.to(device)
+    #     with torch.no_grad():
+    #         out_raw = model(x)
+    #         logits = out_raw[-1] if isinstance(out_raw, (list, tuple)) else out_raw
+    #         acc = (logits.argmax(1) == y).float().mean().item()
+
+    #     if acc > best_acc:
+    #         best_acc = acc
+    #         best_perms = candidate_perms
+
+    #     if best_acc > 0.90:
+    #         print(f"[Calibration] Found match at index {start_idx}! Acc: {best_acc:.2%}")
+    #         break
+
+    # if best_acc < 0.5:
+    #     print(f"\n[WARNING] Best match was only {best_acc:.2%}. Something else might be wrong (e.g. Patch Jitter mismatch).")
+    # else:
+    #     print(f"[Calibration] Locked in permutation set. Best Acc: {best_acc:.2%}")
+
+    # if best_perms is None:
+    #     raise RuntimeError("Calibration failed to determine best_perms (unexpected).")
 
     # ---------------------------------------------------------
     # 3. MAIN METRICS LOOP
