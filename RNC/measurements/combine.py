@@ -233,22 +233,18 @@ def main():
     out_dir = Path(args.out) / 'plots'
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pklA = resolve_json(args.runA)
-    pklB = resolve_json(args.runB)
+    jsonA = resolve_json(args.runA)
+    jsonB = resolve_json(args.runB)
 
-    print(f"Loading A: {pklA}")
-    with open(pklA, 'rb') as f:
-        dataA = pickle.load(f)
+    print(f"Loading A: {jsonA}")
+    dataA = load_metrics_json(jsonA)
 
-    print(f"Loading B: {pklB}")
-    with open(pklB, 'rb') as f:
-        dataB = pickle.load(f)
+    print(f"Loading B: {jsonB}")
+    dataB = load_metrics_json(jsonB)
 
-    # Extract epochs
     epochsA = list(map(int, dataA['epochs']))
     epochsB = list(map(int, dataB['epochs']))
 
-    # Align to common epochs
     common = sorted(set(epochsA).intersection(epochsB))
     if not common:
         sys.exit("No overlapping epochs between runs.")
@@ -327,7 +323,6 @@ def main():
     nc1_layers_A = get_nc1_by_layer_at(dataA, idxA[-1])
     nc1_layers_B = get_nc1_by_layer_at(dataB, idxB[-1])
     if nc1_layers_A and nc1_layers_B:
-        # preserve layer ordering if possible
         layer_order = dataA.get("layer_keys", None)
         if isinstance(layer_order, list) and layer_order:
             layers = [k for k in layer_order if k in nc1_layers_A and k in nc1_layers_B]
@@ -342,8 +337,9 @@ def main():
         else:
             print("[warning] No overlapping layer keys for nc1_by_layer; skipping per-layer plot.")
 
-    # 7) ONLY NC4 addition kept: layerwise mismatch at epoch (default 200)
-    plot_nc4_layerwise_mismatch_at_epoch(out_dir, dataA, dataB, args.label_a, args.label_b, args.epoch)
+    # 7) NC4 layerwise mismatch at epoch (default 200)
+    plot_nc4_layerwise_mismatch_at_epoch(out_dir, dataA, dataB,
+                                         args.label_a, args.label_b, args.epoch)
 
     print("✓ Done – results in", out_dir)
 
