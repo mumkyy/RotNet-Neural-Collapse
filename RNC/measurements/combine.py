@@ -20,6 +20,10 @@ def parse_args():
                    help='Epoch to plot layerwise NC4 mismatch for (default: 200)')
     return p.parse_args()
 
+def load_metrics_json(path: Path) -> dict:
+    with open(path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
 
 def resolve_pkl(pathlike: str) -> Path:
     p = Path(pathlike)
