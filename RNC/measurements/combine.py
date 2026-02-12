@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import argparse
-import pickle
+import json
 import sys
 import matplotlib.pyplot as plt
-
+import pickle
 
 def parse_args():
     p = argparse.ArgumentParser("Compare two measurement runs (dict pickles)")
