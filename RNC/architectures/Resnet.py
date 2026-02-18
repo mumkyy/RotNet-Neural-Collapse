@@ -202,7 +202,7 @@ class ResNet50_NIN_Style(nn.Module):
         # We treat the Stem as Stage 1, and the 4 ResNet layers as Stages 2-5
         # This creates 5 distinct "convX" containers in your feature map.
         self.in_planes = 64
-        block_counts = [3, 4, 6, 3] # Standard ResNet34 depths
+        block_counts = [3, 4, 6, 3] # Standard ResNet50 depths
         
         # Initialize lists for your custom block structure
         # +2 for: Stem (1) + ResNetLayers (4) + Classifier (1 extra appended later)
