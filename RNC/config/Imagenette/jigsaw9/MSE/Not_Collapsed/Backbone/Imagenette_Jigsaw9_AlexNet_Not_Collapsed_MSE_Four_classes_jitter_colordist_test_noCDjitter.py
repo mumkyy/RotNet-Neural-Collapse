@@ -38,8 +38,8 @@ networks['model'] = {'def_file': 'architectures/AlexNet.py', 'pretrained': None,
 config['networks'] = networks
 
 config['nc_reg'] = {
-    'layers':  ['conv1', 'conv2', 'conv3', 'conv4', 'conv5', 'fc_block.3', 'fc_block'],
-    'weights': {'conv1': 0.001,'conv2': 0.001,'conv3': 0.001,'conv4': 0.001,'conv5': 0.001,'fc_block.3': 0.001,'fc_block': 0.001,},
+    'layers':  ['conv1', 'conv2', 'conv3', 'conv4', 'conv5', 'fc6', 'fc7'],
+    'weights': {'conv1': 0.001,'conv2': 0.001,'conv3': 0.001,'conv4': 0.001,'conv5': 0.001,'fc6': 0.001,'fc7': 0.001,},
     'detach_sb': True
 }
 
