@@ -86,6 +86,11 @@ class AlexNet(nn.Module):
         ]
         assert(len(self.all_feat_names) == len(self._feature_blocks))
 
+        self._feature_name_map = dict(zip(self.all_feat_names, self._feature_blocks))
+        self._feature_name_map.update({f'fc_block.{n}': m for n, m in self._feature_blocks[8].named_children()})
+
+
+
     def _parse_out_keys_arg(self, out_feat_keys):
 
         # By default return the features of the last layer / module.
@@ -140,6 +145,12 @@ class AlexNet(nn.Module):
         filters = (filters * scalars.view(-1, 1, 1, 1).expand_as(filters)).cpu().clone()
 
         return filters
+    
+    def get_feature_module(self, name):
+        m = self._feature_name_map[name]
+        if name.startswith("conv") and "." not in name and isinstance(m, nn.Sequential):
+            return list(m.children())[-1]  # last sub-block output
+        return m
 
 def create_model(opt):
     return AlexNet(opt)
