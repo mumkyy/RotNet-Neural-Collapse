@@ -47,11 +47,13 @@ class AlexNet(nn.Module):
         pool5 = nn.MaxPool2d(kernel_size=3, stride=2)
 
         num_pool5_feats = 6 * 6 * 256
-        fc_block = nn.Sequential(
+        fc6 = nn.Sequential(
             Flatten(),
             nn.Linear(num_pool5_feats, 4096, bias=False),
             nn.BatchNorm1d(4096),
             nn.ReLU(inplace=True),
+        )
+        fc7 = nn.Sequential(
             nn.Linear(4096, 4096, bias=False),
             nn.BatchNorm1d(4096),
             nn.ReLU(inplace=True),
@@ -69,7 +71,8 @@ class AlexNet(nn.Module):
             conv4,
             conv5,
             pool5,
-            fc_block,
+            fc6,
+            fc7,
             classifier,
         ])
         self.all_feat_names = [
@@ -81,10 +84,15 @@ class AlexNet(nn.Module):
             'conv4',
             'conv5',
             'pool5',
-            'fc_block',
+            'fc6',
+            'fc7',
             'classifier',
         ]
         assert(len(self.all_feat_names) == len(self._feature_blocks))
+
+        self._feature_name_map = dict(zip(self.all_feat_names, self._feature_blocks))
+
+
 
     def _parse_out_keys_arg(self, out_feat_keys):
 
@@ -140,6 +148,12 @@ class AlexNet(nn.Module):
         filters = (filters * scalars.view(-1, 1, 1, 1).expand_as(filters)).cpu().clone()
 
         return filters
+    
+    def get_feature_module(self, name):
+        m = self._feature_name_map[name]
+        if name.startswith("conv") and "." not in name and isinstance(m, nn.Sequential):
+            return list(m.children())[-1]  # last sub-block output
+        return m
 
 def create_model(opt):
     return AlexNet(opt)
