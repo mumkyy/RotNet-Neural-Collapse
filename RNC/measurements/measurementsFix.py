@@ -252,7 +252,7 @@ def nc4Fun(
     # final classifier prehook to grab penultimate h
     if not hasattr(model, "_feature_blocks"):
         raise RuntimeError("Expected model._feature_blocks (NetworkInNetwork).")
-    cls_layer = model._feature_blocks[-1].Classifier
+    cls_layer = getattr(model._feature_blocks[-1], 'Classifier', None) or model._feature_blocks[-1][0] #works with NIN or AlexNet
 
     penult: Dict[str, torch.Tensor] = {}
 
@@ -418,9 +418,9 @@ def compute_epoch_metrics_multilayer(
     # --- capture penultimate (input to final Linear) for NC3 ---
     if not hasattr(model, "_feature_blocks"):
         raise RuntimeError("Expected model._feature_blocks (NetworkInNetwork).")
-    cls_layer = model._feature_blocks[-1].Classifier
+    cls_layer = getattr(model._feature_blocks[-1], 'Classifier', None) or model._feature_blocks[-1][0]
     if not isinstance(cls_layer, nn.Linear):
-        raise RuntimeError("Expected final classifier to be nn.Linear at model._feature_blocks[-1].Classifier")
+        raise RuntimeError("Expected final classifier to be nn.Linear")
 
     penult: Dict[str, torch.Tensor] = {}
 
