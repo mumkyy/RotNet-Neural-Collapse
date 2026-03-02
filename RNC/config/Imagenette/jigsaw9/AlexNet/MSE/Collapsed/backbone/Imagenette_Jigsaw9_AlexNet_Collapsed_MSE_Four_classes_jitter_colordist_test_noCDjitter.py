@@ -28,13 +28,13 @@ data_test_opt['color_dist_strength'] = 0.0
 
 config['data_train_opt'] = data_train_opt
 config['data_test_opt']  = data_test_opt
-config['max_num_epochs'] = 200
+config['max_num_epochs'] = 500
 
 net_opt = {}
 net_opt['num_classes'] = 4
 
 networks = {}
-net_optim_params = {'optim_type': 'sgd', 'lr': 0.001, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr': [(1, 0.0001), (3, 0.001), (5, 0.002), (7, 0.004), (9, 0.006), (11, 0.008), (13, 0.01), (60, 0.01), (120, 0.002), (160, 0.0004), (200, 0.00008)]}
+net_optim_params = {'optim_type': 'sgd', 'lr': 0.001, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr': [(60, 0.001), (120, 0.0002), (160, 0.00004), (200, 0.000008)]}
 networks['model'] = {'def_file': 'architectures/AlexNet.py', 'pretrained': None, 'opt': net_opt, 'optim_params': net_optim_params}
 config['networks'] = networks
 
