@@ -35,16 +35,13 @@ def main():
 
     data_train_opt = config['data_train_opt']
     data_test_opt = config['data_test_opt']
-    net_opt = config['net_opt']
+    net_opt = config['networks']['model']['opt']
     num_imgs_per_cat = data_train_opt['num_imgs_per_cat'] if ('num_imgs_per_cat' in data_train_opt) else None
     from maxHamming import generate_maximal_hamming_distance_set
-    if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw_9':
-        if net_opt.get('num_classes', 4) != 4: 
-                global_perms_1based = generate_maximal_hamming_distance_set(net_opt.get('num_classes'), K=9)
-        else:
-            global_perms_1based = generate_maximal_hamming_distance_set(4, K=9)
+    if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw_9': 
+        global_perms_1based = generate_maximal_hamming_distance_set(net_opt['num_classes'], K=9)
     else: 
-        global_perms_1based = generate_maximal_hamming_distance_set(4, K=4)
+        global_perms_1based = generate_maximal_hamming_distance_set(net_opt['num_classes'], K=4)
     global_perms = [tuple(x-1 for x in p) for p in global_perms_1based]
 
     dataset_train = GenericDataset(
