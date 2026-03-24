@@ -2,7 +2,7 @@
 
 python train_and_eval.py \
   --task jigsaw \
-  --dataset imagenet \
+  --dataset imagenette \
   --train_split train \
   --val_split val \
   --batch_size 128 \
