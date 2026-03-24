@@ -233,7 +233,9 @@ class ResNet50_NIN_Style(nn.Module):
         # --- Final Classifier Block ---
         blocks.append(nn.Sequential())
         blocks[-1].add_module('GlobalAveragePooling', GlobalAveragePooling())
+        blocks[-1].add_module('PenultBN', nn.BatchNorm1d(512 * ResNetBottleneckBlock.expansion))
         blocks[-1].add_module('Classifier', nn.Linear(512 * ResNetBottleneckBlock.expansion, num_classes))
+
 
         # --- EXACT Copy of your NIN Feature Extraction Logic ---
         self._feature_blocks = nn.ModuleList(blocks)
@@ -251,7 +253,7 @@ class ResNet50_NIN_Style(nn.Module):
 
         self._feature_name_map = {
             "classifier": self._feature_blocks[-1].Classifier, 
-            "penult" : self._feature_blocks[-1].GlobalAveragePooling
+            "penult" : self._feature_blocks[-1].GlobalAveragePooling.PenultBN
         }
         
         for i, block in enumerate(self._feature_blocks[:-1]):
@@ -296,6 +298,7 @@ class ResNet50_NIN_Style(nn.Module):
         fc  = self._feature_blocks[-1].Classifier
 
         pen = gap(feat)
+        pen = self._feature_blocks[-1].PenultBN(pen)
         idx = out_index.get('penult')
         if idx is not None:
             out_feats[idx] = pen
@@ -336,7 +339,7 @@ if __name__ == '__main__':
     print("Sample keys:", net.all_feat_names[:5], "...", net.all_feat_names[-5:])
 
     # 3. Dummy Forward Pass
-    x = torch.randn(1, 3, 160, 160) # Imagenette size
+    xx = torch.randn(4, 3, 160, 160)# Imagenette size
     
     # Test grabbing specific ResNet blocks
     target_keys = ['conv2.block0', 'conv5.block2', 'classifier']
