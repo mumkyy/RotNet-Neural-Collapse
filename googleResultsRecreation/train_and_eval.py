@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -67,6 +68,7 @@ def set_random_seed(seed):
     if seed is None:
         return
     random.seed(seed)
+    np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
@@ -95,54 +97,14 @@ def build_data_cfg(args):
     )
 
 
-def build_model(args):
-    # For jigsaw-style configs, embed_dim is the classifier output size.
-    if args.task in ("jigsaw", "relative_patch_location", "rotation", "exemplar"):
-        num_classes = args.embed_dim if args.embed_dim is not None else 1000
-    else:
-        num_classes = datasets.get_num_classes(build_data_cfg(args))
-
-    model_fn = get_net(args, num_classes=num_classes)
-
-    # Compatibility layer:
-    # models/utils.py may pass kwargs that models/pytorch_resnet.py ignores.
-    sig = inspect.signature(model_fn.func)
-    accepted = set(sig.parameters.keys())
-
-    merged_kwargs = {}
-    merged_kwargs.update(model_fn.keywords or {})
-
-    filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in accepted}
-    model = model_fn.func(*model_fn.args, **filtered_kwargs)
-    return model
-
-
-def get_optimizer(args, model):
-    base_lr = args.lr * (args.batch_size / args.lr_scale_batch_size)
-
-    if (args.optimizer or "sgd").lower() == "adam":
-        return optim.Adam(
-            model.parameters(),
-            lr=base_lr,
-            weight_decay=args.weight_decay if args.weight_decay is not None else 1e-4,
-        )
-
-    return optim.SGD(
-        model.parameters(),
-        lr=base_lr,
-        momentum=0.9,
-        weight_decay=args.weight_decay if args.weight_decay is not None else 1e-4,
-    )
+def current_lr(optimizer):
+    return optimizer.param_groups[0]["lr"]
 
 
 def get_milestones(args):
     if args.decay_epochs is None:
         return []
     return list(args.decay_epochs)
-
-
-def current_lr(optimizer):
-    return optimizer.param_groups[0]["lr"]
 
 
 def maybe_adjust_learning_rate(optimizer, base_lr, epoch_float, args):
@@ -161,6 +123,26 @@ def maybe_adjust_learning_rate(optimizer, base_lr, epoch_float, args):
 
     for param_group in optimizer.param_groups:
         param_group["lr"] = lr
+
+
+def move_batch_to_device(batch, device):
+    out = {}
+    for k, v in batch.items():
+        if torch.is_tensor(v):
+            out[k] = v.to(device, non_blocking=True)
+        else:
+            out[k] = v
+    return out
+
+
+def list_checkpoints(workdir):
+    ckpt_dir = Path(workdir)
+    if not ckpt_dir.exists():
+        return []
+    return sorted(
+        [p for p in ckpt_dir.glob("checkpoint_step_*.pt")] + [p for p in ckpt_dir.glob("checkpoint_last.pt")],
+        key=lambda p: p.stat().st_mtime,
+    )
 
 
 def save_checkpoint(workdir, step, epoch, model, optimizer, best_metric=None, name=None):
@@ -183,16 +165,6 @@ def save_checkpoint(workdir, step, epoch, model, optimizer, best_metric=None, na
     return str(path)
 
 
-def list_checkpoints(workdir):
-    ckpt_dir = Path(workdir)
-    if not ckpt_dir.exists():
-        return []
-    return sorted(
-        [p for p in ckpt_dir.glob("checkpoint_step_*.pt")],
-        key=lambda p: p.stat().st_mtime,
-    )
-
-
 def load_checkpoint(model, optimizer, checkpoint_path, device):
     payload = torch.load(checkpoint_path, map_location=device)
 
@@ -208,42 +180,275 @@ def load_checkpoint(model, optimizer, checkpoint_path, device):
     return step, epoch, best_metric
 
 
+def compute_patch_size(crop_size, splits_per_side, patch_jitter):
+    if isinstance(crop_size, tuple):
+        crop_h, crop_w = crop_size
+        if crop_h != crop_w:
+            raise ValueError("This export helper expects square crop_size for jigsaw.")
+        crop_size = crop_h
+    grid = crop_size // splits_per_side
+    patch_size = grid - patch_jitter
+    if patch_size <= 0:
+        raise ValueError(
+            f"Invalid jigsaw patch size. crop_size={crop_size}, "
+            f"splits_per_side={splits_per_side}, patch_jitter={patch_jitter}"
+        )
+    return patch_size
+
+
 def export_torchscript(model, args, export_dir, device):
     export_dir = Path(export_dir)
     export_dir.mkdir(parents=True, exist_ok=True)
 
-    shape = args.serving_input_shape or (None, 64, 64, 3)
-    if len(shape) != 4:
-        raise ValueError(f"Expected serving_input_shape with 4 dims, got {shape}")
-
-    _, h, w, c = shape
-    if h is None or w is None or c is None:
-        h, w, c = 64, 64, 3
-
     model_to_export = model.module if isinstance(model, nn.DataParallel) else model
     model_to_export.eval()
 
-    dummy = torch.randn(1, c, h, w, device=device)
+    if args.task == "jigsaw":
+        patch_count = args.splits_per_side * args.splits_per_side
+        patch_size = compute_patch_size(args.crop_size, args.splits_per_side, args.patch_jitter)
+        dummy = torch.randn(1, patch_count, 3, patch_size, patch_size, device=device)
+    else:
+        shape = args.serving_input_shape or (None, 64, 64, 3)
+        if len(shape) != 4:
+            raise ValueError(f"Expected serving_input_shape with 4 dims, got {shape}")
+        _, h, w, c = shape
+        if h is None or w is None or c is None:
+            h, w, c = 64, 64, 3
+        dummy = torch.randn(1, c, h, w, device=device)
+
     traced = torch.jit.trace(model_to_export, dummy)
     out_path = export_dir / "model.ts"
     traced.save(str(out_path))
     return str(out_path)
 
 
-def move_batch_to_device(batch, device):
-    out = {}
-    for k, v in batch.items():
-        if torch.is_tensor(v):
-            out[k] = v.to(device, non_blocking=True)
+def get_optimizer(args, model):
+    base_lr = args.lr * (args.batch_size / args.lr_scale_batch_size)
+
+    if (args.optimizer or "sgd").lower() == "adam":
+        return optim.Adam(
+            model.parameters(),
+            lr=base_lr,
+            weight_decay=args.weight_decay if args.weight_decay is not None else 1e-4,
+        )
+
+    return optim.SGD(
+        model.parameters(),
+        lr=base_lr,
+        momentum=0.9,
+        weight_decay=args.weight_decay if args.weight_decay is not None else 1e-4,
+    )
+
+
+def load_permutations(path):
+    if path is None:
+        raise ValueError(
+            "Jigsaw requires --permutations_path pointing to permutations_100_max.bin "
+            "(or another compatible permutation bank)."
+        )
+
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Permutation file not found: {path}")
+
+    data = np.fromfile(str(path), dtype=np.int32)
+    if data.size < 2:
+        raise ValueError(f"Invalid permutation file: {path}")
+
+    num_perms = int(data[0])
+    perm_len = int(data[1])
+    expected = 2 + num_perms * perm_len
+
+    if data.size != expected:
+        raise ValueError(
+            f"Invalid permutation file size. Expected {expected} int32 values, got {data.size}."
+        )
+
+    perms = data[2:].reshape(num_perms, perm_len)
+    perms = perms - 1  # Google file is 1-indexed
+    return torch.tensor(perms, dtype=torch.long)
+
+
+class JigsawHead(nn.Module):
+    """
+    Faithful-enough PyTorch head for the Google jigsaw path:
+    concat permuted patch embeddings along channels, then classify permutation.
+    """
+
+    def __init__(self, in_channels, num_classes, hidden_dim=4096, dropout=0.5):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1, bias=True)
+        self.bn1 = nn.BatchNorm2d(hidden_dim)
+        self.relu = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout(p=dropout)
+        self.conv2 = nn.Conv2d(hidden_dim, num_classes, kernel_size=1, bias=True)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.conv2(x)
+        x = x.mean(dim=(2, 3))
+        return x
+
+
+def permute_and_concat_batch_patches(patch_embeddings, perms):
+    """
+    patch_embeddings: [B, P, C, H, W]
+    perms: [M, P]
+
+    Returns:
+        [B*M, P*C, H, W]
+    """
+    if patch_embeddings.ndim != 5:
+        raise ValueError(f"Expected patch embeddings with shape [B,P,C,H,W], got {tuple(patch_embeddings.shape)}")
+    if perms.ndim != 2:
+        raise ValueError(f"Expected perms with shape [M,P], got {tuple(perms.shape)}")
+
+    bsz, patch_count, channels, height, width = patch_embeddings.shape
+    subset_size, perm_len = perms.shape
+
+    if patch_count != perm_len:
+        raise ValueError(
+            f"Patch count / permutation length mismatch: patches={patch_count}, perm_len={perm_len}"
+        )
+
+    # [B, M, P, C, H, W]
+    expanded = patch_embeddings.unsqueeze(1).expand(bsz, subset_size, patch_count, channels, height, width)
+
+    # [1, M, P, 1, 1, 1] -> [B, M, P, C, H, W]
+    gather_index = perms.view(1, subset_size, perm_len, 1, 1, 1).expand(
+        bsz, subset_size, perm_len, channels, height, width
+    )
+
+    permuted = torch.gather(expanded, dim=2, index=gather_index)
+    concat = permuted.reshape(bsz, subset_size, patch_count * channels, height, width)
+    concat = concat.reshape(bsz * subset_size, patch_count * channels, height, width)
+    return concat
+
+
+class JigsawModel(nn.Module):
+    def __init__(self, backbone, embed_dim, permutations, perm_subset_size):
+        super().__init__()
+        self.backbone = backbone
+        self.register_buffer("permutations", permutations)
+        self.perm_subset_size = perm_subset_size
+
+        perm_count, perm_len = permutations.shape
+        self.perm_len = perm_len
+        self.embed_dim = embed_dim
+        self.head = JigsawHead(
+            in_channels=embed_dim * perm_len,
+            num_classes=perm_count,
+        )
+
+    def _select_permutation_subset(self, training, device):
+        total = self.permutations.shape[0]
+        subset = min(self.perm_subset_size, total)
+
+        if training:
+            idx = torch.randperm(total, device=device)[:subset]
         else:
-            out[k] = v
-    return out
+            idx = torch.arange(subset, device=device)
+
+        perms = self.permutations[idx].to(device)
+        return idx, perms
+
+    def forward(self, x):
+        """
+        x: [B, P, C, H, W]
+        returns:
+            {
+              "logits": [B*M, num_perms],
+              "labels": [B*M],
+              "perm_indices": [M]
+            }
+        """
+        if x.ndim != 5:
+            raise ValueError(f"JigsawModel expected input [B,P,C,H,W], got {tuple(x.shape)}")
+
+        bsz, patch_count, channels, height, width = x.shape
+
+        if patch_count != self.perm_len:
+            raise ValueError(
+                f"Expected {self.perm_len} patches per image from permutation bank, got {patch_count}"
+            )
+
+        flat = x.reshape(bsz * patch_count, channels, height, width)
+
+        # backbone returns spatial map because we build it with global_pool=False
+        feats = self.backbone(flat)
+        if feats.ndim != 4:
+            raise ValueError(
+                f"Expected backbone to return [B*P,C,H,W] spatial embeddings for jigsaw, got {tuple(feats.shape)}"
+            )
+
+        _, feat_c, feat_h, feat_w = feats.shape
+        feats = feats.reshape(bsz, patch_count, feat_c, feat_h, feat_w)
+
+        perm_indices, selected_perms = self._select_permutation_subset(self.training, x.device)
+        concat_feats = permute_and_concat_batch_patches(feats, selected_perms)
+
+        logits = self.head(concat_feats)
+        labels = perm_indices.repeat(bsz)
+
+        return {
+            "logits": logits,
+            "labels": labels,
+            "perm_indices": perm_indices,
+        }
+
+
+def build_model(args):
+    if args.task == "jigsaw":
+        permutations = load_permutations(args.permutations_path)
+
+        # For jigsaw, the backbone should output spatial embeddings, not pooled class logits.
+        model_fn = get_net(args, num_classes=args.embed_dim)
+
+        sig = inspect.signature(model_fn.func)
+        accepted = set(sig.parameters.keys())
+
+        merged_kwargs = {}
+        merged_kwargs.update(model_fn.keywords or {})
+        merged_kwargs["global_pool"] = False
+
+        filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in accepted}
+        backbone = model_fn.func(*model_fn.args, **filtered_kwargs)
+
+        model = JigsawModel(
+            backbone=backbone,
+            embed_dim=args.embed_dim,
+            permutations=permutations,
+            perm_subset_size=args.perm_subset_size,
+        )
+        return model
+
+    if args.task in ("relative_patch_location", "rotation", "exemplar"):
+        num_classes = args.embed_dim if args.embed_dim is not None else 1000
+    else:
+        num_classes = datasets.get_num_classes(build_data_cfg(args))
+
+    model_fn = get_net(args, num_classes=num_classes)
+
+    sig = inspect.signature(model_fn.func)
+    accepted = set(sig.parameters.keys())
+
+    merged_kwargs = {}
+    merged_kwargs.update(model_fn.keywords or {})
+
+    filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in accepted}
+    model = model_fn.func(*model_fn.args, **filtered_kwargs)
+    return model
 
 
 def infer_targets(batch, args, device):
     images = batch["image"]
 
-    # Generic supervised path
+    if args.task == "jigsaw":
+        return images, None
+
     if args.task not in ("rotation",):
         if "label" not in batch:
             raise ValueError(
@@ -253,14 +458,12 @@ def infer_targets(batch, args, device):
         labels = batch["label"].long().to(device)
         return images, labels
 
-    # Rotation path
     if images.ndim == 5:
-        # [B, 4, C, H, W] -> [B*4, C, H, W], labels 0..3 repeated B times
         b, r, c, h, w = images.shape
         if r != 4:
             raise ValueError(f"Expected 4 rotations, got shape {tuple(images.shape)}")
         labels = torch.arange(4, device=device).repeat(b)
-        images = images.view(b * 4, c, h, w)
+        images = images.view(b * r, c, h, w)
         return images, labels
 
     if "label" not in batch:
@@ -270,8 +473,6 @@ def infer_targets(batch, args, device):
 
 
 def flatten_patch_batch_if_needed(images, labels=None):
-    # If preprocessing produced [B, N, C, H, W], flatten to [B*N, C, H, W].
-    # This is useful for patch-wise classifiers or debugging, but only if labels match.
     if images.ndim == 5:
         b, n, c, h, w = images.shape
         images = images.view(b * n, c, h, w)
@@ -280,10 +481,32 @@ def flatten_patch_batch_if_needed(images, labels=None):
             if labels.ndim == 2 and labels.shape == (b, n):
                 labels = labels.reshape(-1)
             elif labels.ndim == 1 and labels.numel() == b:
-                # per-image label; leave as-is
                 pass
 
     return images, labels
+
+
+def compute_outputs_and_loss(model, batch, device, args, criterion):
+    batch = move_batch_to_device(batch, device)
+    images, labels = infer_targets(batch, args, device)
+
+    if args.task == "jigsaw":
+        outputs = model(images)
+        logits = outputs["logits"]
+        labels = outputs["labels"].long()
+        loss = criterion(logits, labels)
+        return logits, labels, loss
+
+    images, labels = flatten_patch_batch_if_needed(images, labels)
+    logits = model(images)
+
+    if labels.shape[0] != logits.shape[0]:
+        raise ValueError(
+            f"Label / logits batch mismatch. labels={tuple(labels.shape)}, logits={tuple(logits.shape)}"
+        )
+
+    loss = criterion(logits, labels)
+    return logits, labels, loss
 
 
 @torch.no_grad()
@@ -296,20 +519,7 @@ def evaluate(model, data_loader, device, args, checkpoint_path=None):
     total_count = 0
 
     for batch in data_loader:
-        batch = move_batch_to_device(batch, device)
-        images, labels = infer_targets(batch, args, device)
-        images, labels = flatten_patch_batch_if_needed(images, labels)
-
-        logits = model(images)
-
-        # If logits are per patch but labels are per image, that mismatch should fail loudly.
-        if labels.shape[0] != logits.shape[0]:
-            raise ValueError(
-                f"Label / logits batch mismatch during eval. "
-                f"labels={tuple(labels.shape)}, logits={tuple(logits.shape)}"
-            )
-
-        loss = criterion(logits, labels)
+        logits, labels, loss = compute_outputs_and_loss(model, batch, device, args, criterion)
         preds = torch.argmax(logits, dim=1)
 
         total_loss += loss.item() * labels.size(0)
@@ -354,24 +564,10 @@ def train(model, train_loader, val_loader, device, args):
             epoch_float = global_step / max(updates_per_epoch, 1)
             maybe_adjust_learning_rate(optimizer, base_lr, epoch_float, args)
 
-            batch = move_batch_to_device(batch, device)
-            images, labels = infer_targets(batch, args, device)
-            images, labels = flatten_patch_batch_if_needed(images, labels)
-
             model.train()
             optimizer.zero_grad()
 
-            logits = model(images)
-
-            if labels.shape[0] != logits.shape[0]:
-                raise ValueError(
-                    f"Label / logits batch mismatch during train. "
-                    f"labels={tuple(labels.shape)}, logits={tuple(logits.shape)}. "
-                    f"If you are using crop_patches for jigsaw, you still need "
-                    f"task-specific permutation targets/head logic."
-                )
-
-            loss = criterion(logits, labels)
+            logits, labels, loss = compute_outputs_and_loss(model, batch, device, args, criterion)
             loss.backward()
             optimizer.step()
 
@@ -381,6 +577,7 @@ def train(model, train_loader, val_loader, device, args):
                 with torch.no_grad():
                     preds = torch.argmax(logits, dim=1)
                     acc = (preds == labels).float().mean().item()
+
                 print(
                     f"step={global_step}/{num_steps} "
                     f"epoch={epoch_float:.3f} "
@@ -446,7 +643,6 @@ def run_eval(model, val_loader, device, args):
 
 def build_loaders(args):
     cfg = build_data_cfg(args)
-
     eval_batch_size = args.eval_batch_size if args.eval_batch_size is not None else args.batch_size
 
     train_loader = None
@@ -539,6 +735,7 @@ def get_parser():
     parser.add_argument("--patch_jitter", type=int, default=0)
     parser.add_argument("--perm_subset_size", type=int, default=8)
     parser.add_argument("--splits_per_side", type=int, default=3)
+    parser.add_argument("--permutations_path", type=str, default=None)
 
     # Evaluation flags.
     parser.add_argument("--eval_model", type=str, default=None)
