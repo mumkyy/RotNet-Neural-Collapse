@@ -1,173 +1,308 @@
 #!/usr/bin/env python3
 
-"""Preprocessing methods (PyTorch version)."""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-import random
+import os
+from pathlib import Path
 
 import torch
-from torchvision import transforms
-from torchvision.transforms import functional as TF
+from torch.utils.data import DataLoader
+from torchvision.datasets import ImageFolder
+from torchvision.datasets.folder import default_loader
 
-import patch_model_preprocess as pp_lib
-
-
-def get_resize_preprocess(size):
-    return transforms.Resize(size)
+from preprocess import get_preprocess_fn
 
 
-def get_resize_small(smaller_size):
-    return transforms.Resize(smaller_size)
+def _existing_dir(path):
+    path = Path(path).expanduser()
+    return path if path.exists() and path.is_dir() else None
 
 
-def get_crop(is_training, crop_size):
-    if isinstance(crop_size, int):
-        crop_size = (crop_size, crop_size)
+def _resolve_dataset_root(dataset_name, dataset_dir):
+    """
+    Resolve the dataset root directory.
 
-    if is_training:
-        return transforms.RandomCrop(crop_size)
-    return transforms.CenterCrop(crop_size)
+    For your cluster layout, valid roots for imagenette include:
+      /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160
+      /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette
+      /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets
 
+    and we normalize them to the directory that directly contains train/ and val/.
+    """
+    dataset_dir = Path(os.path.expanduser(str(dataset_dir)))
 
-def get_random_flip_lr(is_training):
-    if is_training:
-        return transforms.RandomHorizontalFlip()
-    return transforms.Lambda(lambda x: x)
+    candidates = []
 
+    if dataset_name.lower() == "imagenette":
+        candidates.extend([
+            dataset_dir,
+            dataset_dir / "imagenette2-160",
+            dataset_dir / "Imagenette" / "imagenette2-160",
+            dataset_dir / "Imagenette",
+            dataset_dir / "imagenette",
+        ])
+    else:
+        candidates.append(dataset_dir)
 
-def get_to_gray_preprocess(prob):
-    def _to_gray(img):
-        if random.random() < prob:
-            img = TF.rgb_to_grayscale(img, num_output_channels=3)
-        return img
-    return transforms.Lambda(_to_gray)
+    for candidate in candidates:
+        candidate = Path(candidate)
+        if (candidate / "train").is_dir() and (candidate / "val").is_dir():
+            return candidate
 
-
-def get_value_range_preprocess(vmin=-1, vmax=1):
-    def _scale(img):
-        if not torch.is_tensor(img):
-            img = TF.to_tensor(img)  # [0,1]
-        return vmin + img * (vmax - vmin)
-    return transforms.Lambda(_scale)
-
-
-def get_standardization_preprocess():
-    def _standardize(img):
-        # Single image: [C,H,W]
-        if img.ndim == 3:
-            mean = img.mean()
-            std = img.std()
-            if std <= 0:
-                std = torch.tensor(1.0, device=img.device, dtype=img.dtype)
-            return (img - mean) / std
-
-        # Stack of patches: [N,C,H,W]
-        if img.ndim == 4:
-            mean = img.mean(dim=(1, 2, 3), keepdim=True)
-            std = img.std(dim=(1, 2, 3), keepdim=True)
-            std = torch.where(std > 0, std, torch.ones_like(std))
-            return (img - mean) / std
-
-        raise ValueError(f"Unsupported tensor shape for standardization: {tuple(img.shape)}")
-
-    return transforms.Lambda(_standardize)
+    tried = "\n".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        f"Could not resolve dataset root for dataset='{dataset_name}' from dataset_dir='{dataset_dir}'. "
+        f"Tried:\n{tried}\n"
+        f"Need a directory containing train/ and val/."
+    )
 
 
-def get_rotate_preprocess():
-    def _rotate(img):
-        if not torch.is_tensor(img):
-            img = TF.to_tensor(img)
+def _resolve_split_dir(dataset_name, dataset_dir, split_name):
+    root = _resolve_dataset_root(dataset_name, dataset_dir)
+    split_dir = root / split_name
+    if split_dir.is_dir():
+        return split_dir
 
-        imgs = [
-            img,
-            torch.rot90(img, k=1, dims=(1, 2)),
-            torch.rot90(img, k=2, dims=(1, 2)),
-            torch.rot90(img, k=3, dims=(1, 2)),
-        ]
-        return torch.stack(imgs, dim=0)
-    return transforms.Lambda(_rotate)
+    raise FileNotFoundError(
+        f"Could not find split '{split_name}' under dataset root '{root}'."
+    )
 
 
-def get_preprocess_fn(
-    fn_names,
+class WrappedImageFolder(ImageFolder):
+    """
+    Returns dict batches compatible with your current training code:
+
+        {
+            "image": tensor,
+            "label": torch.long scalar
+        }
+
+    If preprocessing includes crop_patches, then image will already be shaped
+    like [P, C, H, W] for a single sample, and DataLoader will batch it into
+    [B, P, C, H, W], which is what your jigsaw path expects.
+    """
+
+    def __init__(self, root, transform=None):
+        super().__init__(root=root, transform=transform, loader=default_loader)
+
+    def __getitem__(self, index):
+        path, label = self.samples[index]
+        image = self.loader(path)
+
+        if self.transform is not None:
+            image = self.transform(image)
+
+        return {
+            "image": image,
+            "label": torch.tensor(label, dtype=torch.long),
+        }
+
+
+class DatasetImagenette(object):
+    NUM_CLASSES = 10
+
+    def __init__(
+        self,
+        split_name,
+        preprocess_fn,
+        dataset_dir,
+        num_epochs,
+        shuffle,
+        random_seed=None,
+        drop_remainder=True,
+    ):
+        del num_epochs
+        del random_seed
+
+        self.dataset_name = "imagenette"
+        self.split_name = split_name
+        self.preprocess_fn = preprocess_fn
+        self.dataset_root = _resolve_dataset_root(self.dataset_name, dataset_dir)
+        self.split_dir = _resolve_split_dir(self.dataset_name, dataset_dir, split_name)
+        self.shuffle = shuffle
+        self.drop_remainder = drop_remainder
+
+        self.dataset = WrappedImageFolder(
+            root=str(self.split_dir),
+            transform=self.preprocess_fn,
+        )
+
+        self.COUNTS = {
+            "train": len(WrappedImageFolder(
+                root=str(_resolve_split_dir(self.dataset_name, dataset_dir, "train")),
+                transform=None,
+            )),
+            "val": len(WrappedImageFolder(
+                root=str(_resolve_split_dir(self.dataset_name, dataset_dir, "val")),
+                transform=None,
+            )),
+        }
+
+        self.NUM_CLASSES = len(self.dataset.classes)
+
+    def input_fn(self, params):
+        batch_size = params["batch_size"]
+        num_workers = params.get("num_workers", 0)
+        pin_memory = params.get("pin_memory", False)
+
+        return DataLoader(
+            self.dataset,
+            batch_size=batch_size,
+            shuffle=self.shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            drop_last=self.drop_remainder,
+        )
+
+
+class DatasetImagenet(object):
+    """
+    Generic ImageFolder-style ImageNet support.
+    Expects dataset_dir to resolve to a directory containing train/ and val/.
+    """
+
+    NUM_CLASSES = 1000
+
+    def __init__(
+        self,
+        split_name,
+        preprocess_fn,
+        dataset_dir,
+        num_epochs,
+        shuffle,
+        random_seed=None,
+        drop_remainder=True,
+    ):
+        del num_epochs
+        del random_seed
+
+        self.dataset_name = "imagenet"
+        self.split_name = split_name
+        self.preprocess_fn = preprocess_fn
+        self.dataset_root = _resolve_dataset_root(self.dataset_name, dataset_dir)
+        self.split_dir = _resolve_split_dir(self.dataset_name, dataset_dir, split_name)
+        self.shuffle = shuffle
+        self.drop_remainder = drop_remainder
+
+        self.dataset = WrappedImageFolder(
+            root=str(self.split_dir),
+            transform=self.preprocess_fn,
+        )
+
+        self.NUM_CLASSES = len(self.dataset.classes)
+
+    def input_fn(self, params):
+        batch_size = params["batch_size"]
+        num_workers = params.get("num_workers", 0)
+        pin_memory = params.get("pin_memory", False)
+
+        return DataLoader(
+            self.dataset,
+            batch_size=batch_size,
+            shuffle=self.shuffle,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            drop_last=self.drop_remainder,
+        )
+
+
+DATASET_MAP = {
+    "imagenette": DatasetImagenette,
+    "imagenet": DatasetImagenet,
+}
+
+
+def get_data(
+    params,
+    split_name,
     is_training,
-    resize_size=(292, 292),
-    crop_size=255,
-    grayscale_probability=1.0,
-    splits_per_side=3,
-    patch_jitter=0,
-    smaller_size=256,
+    shuffle=True,
+    num_epochs=None,
+    drop_remainder=False,
+    cfg=None,
 ):
     """
-    Builds a torchvision Compose from a comma-separated preprocessing spec.
+    PyTorch equivalent of the TF get_data(...).
 
-    Args:
-        fn_names: e.g. "resize,to_gray,crop,crop_patches,standardization"
-        is_training: bool
-        resize_size: tuple[int,int] or int
-        crop_size: tuple[int,int] or int
-        grayscale_probability: float
-        splits_per_side: int
-        patch_jitter: int
-        smaller_size: int
+    Returns:
+        torch.utils.data.DataLoader
     """
-    if not fn_names:
-        fn_names = "plain_preprocess"
+    if cfg is None:
+        raise ValueError("get_data(...) requires cfg in the PyTorch version.")
 
-    def expand(fn_name):
-        fn_name = fn_name.strip()
+    dataset_name = str(cfg.dataset).lower()
+    if dataset_name not in DATASET_MAP:
+        raise ValueError(
+            f"Unsupported dataset: {cfg.dataset}. "
+            f"Supported datasets: {list(DATASET_MAP.keys())}"
+        )
 
-        if fn_name == "plain_preprocess":
-            yield transforms.Lambda(lambda x: x)
+    preprocess_fn = get_preprocess_fn(
+        fn_names=cfg.preprocessing,
+        is_training=is_training,
+        resize_size=cfg.resize_size,
+        crop_size=cfg.crop_size,
+        grayscale_probability=cfg.grayscale_probability,
+        splits_per_side=cfg.splits_per_side,
+        patch_jitter=cfg.patch_jitter,
+        smaller_size=cfg.smaller_size,
+    )
 
-        elif fn_name == "resize":
-            yield get_resize_preprocess(resize_size)
+    dataset_cls = DATASET_MAP[dataset_name]
+    dataset_obj = dataset_cls(
+        split_name=split_name,
+        preprocess_fn=preprocess_fn,
+        dataset_dir=cfg.dataset_dir,
+        num_epochs=num_epochs,
+        shuffle=shuffle,
+        random_seed=getattr(cfg, "random_seed", None),
+        drop_remainder=drop_remainder,
+    )
 
-        elif fn_name == "resize_small":
-            yield get_resize_small(smaller_size)
+    return dataset_obj.input_fn(params)
 
-        elif fn_name == "crop":
-            yield get_crop(is_training, crop_size)
 
-        elif fn_name == "central_crop":
-            yield get_crop(False, crop_size)
+def get_count(split_name, cfg=None):
+    if cfg is None:
+        raise ValueError("get_count(...) requires cfg in the PyTorch version.")
 
-        elif fn_name == "flip_lr":
-            yield get_random_flip_lr(is_training)
+    dataset_name = str(cfg.dataset).lower()
+    if dataset_name not in DATASET_MAP:
+        raise ValueError(
+            f"Unsupported dataset: {cfg.dataset}. "
+            f"Supported datasets: {list(DATASET_MAP.keys())}"
+        )
 
-        elif fn_name == "to_gray":
-            yield get_to_gray_preprocess(grayscale_probability)
+    if dataset_name == "imagenette":
+        root = _resolve_split_dir("imagenette", cfg.dataset_dir, split_name)
+        return len(ImageFolder(root=str(root)))
 
-        elif fn_name == "0_to_1":
-            yield transforms.ToTensor()
+    if dataset_name == "imagenet":
+        root = _resolve_split_dir("imagenet", cfg.dataset_dir, split_name)
+        return len(ImageFolder(root=str(root)))
 
-        elif fn_name == "-1_to_1":
-            yield get_value_range_preprocess(-1, 1)
+    raise ValueError(f"Unsupported dataset: {cfg.dataset}")
 
-        elif fn_name == "standardization":
-            # Ensure tensor first
-            yield transforms.Lambda(lambda x: x if torch.is_tensor(x) else TF.to_tensor(x))
-            yield get_standardization_preprocess()
 
-        elif fn_name == "rotate":
-            # Ensure tensor first
-            yield transforms.Lambda(lambda x: x if torch.is_tensor(x) else TF.to_tensor(x))
-            yield get_rotate_preprocess()
+def get_num_classes(cfg=None):
+    if cfg is None:
+        raise ValueError("get_num_classes(...) requires cfg in the PyTorch version.")
 
-        elif fn_name == "crop_patches":
-            # Ensure tensor first because patch extractor expects [C,H,W]
-            yield transforms.Lambda(lambda x: x if torch.is_tensor(x) else TF.to_tensor(x))
-            yield pp_lib.get_crop_patches_fn(
-                is_training,
-                split_per_side=splits_per_side,
-                patch_jitter=patch_jitter,
-            )
+    dataset_name = str(cfg.dataset).lower()
+    if dataset_name not in DATASET_MAP:
+        raise ValueError(
+            f"Unsupported dataset: {cfg.dataset}. "
+            f"Supported datasets: {list(DATASET_MAP.keys())}"
+        )
 
-        else:
-            raise ValueError(f"Unsupported preprocessing: {fn_name}")
+    if dataset_name == "imagenette":
+        root = _resolve_split_dir("imagenette", cfg.dataset_dir, "train")
+        return len(ImageFolder(root=str(root)).classes)
 
-    transforms_list = []
-    for fn_name in fn_names.split(","):
-        for t in expand(fn_name):
-            transforms_list.append(t)
+    if dataset_name == "imagenet":
+        root = _resolve_split_dir("imagenet", cfg.dataset_dir, "train")
+        return len(ImageFolder(root=str(root)).classes)
 
-    return transforms.Compose(transforms_list)
+    raise ValueError(f"Unsupported dataset: {cfg.dataset}")

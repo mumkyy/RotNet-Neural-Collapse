@@ -1,8 +1,11 @@
 #!/bin/sh
 
 python train_and_eval.py \
+  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/jigsaw_imagenette_resnet50 \
   --task jigsaw \
   --dataset imagenette \
+  --dataset_dir /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160 \
+  --permutations_path /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/permutations_100_max.bin \
   --train_split train \
   --val_split val \
   --batch_size 128 \
