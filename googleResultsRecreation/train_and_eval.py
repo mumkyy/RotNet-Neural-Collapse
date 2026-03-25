@@ -404,18 +404,14 @@ def build_model(args):
     if args.task == "jigsaw":
         permutations = load_permutations(args.permutations_path)
 
-        # For jigsaw, the backbone should output spatial embeddings, not pooled class logits.
         model_fn = get_net(args, num_classes=args.embed_dim)
-
-        sig = inspect.signature(model_fn.func)
-        accepted = set(sig.parameters.keys())
 
         merged_kwargs = {}
         merged_kwargs.update(model_fn.keywords or {})
         merged_kwargs["global_pool"] = False
 
-        filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in accepted}
-        backbone = model_fn.func(*model_fn.args, **filtered_kwargs)
+        # Do NOT filter kwargs here; resnet50 forwards **kwargs into ResNet(...)
+        backbone = model_fn.func(*model_fn.args, **merged_kwargs)
 
         model = JigsawModel(
             backbone=backbone,
@@ -432,16 +428,11 @@ def build_model(args):
 
     model_fn = get_net(args, num_classes=num_classes)
 
-    sig = inspect.signature(model_fn.func)
-    accepted = set(sig.parameters.keys())
-
     merged_kwargs = {}
     merged_kwargs.update(model_fn.keywords or {})
 
-    filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in accepted}
-    model = model_fn.func(*model_fn.args, **filtered_kwargs)
+    model = model_fn.func(*model_fn.args, **merged_kwargs)
     return model
-
 
 def infer_targets(batch, args, device):
     images = batch["image"]
