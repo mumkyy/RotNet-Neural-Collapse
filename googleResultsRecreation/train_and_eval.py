@@ -615,11 +615,13 @@ def train(model, train_loader, val_loader, device, args):
 
     Path(os.path.join(args.workdir, "TRAINING_IS_DONE")).touch()
 
-    export_dir = os.path.join(args.workdir, "export", "torchscript")
-    exported = export_torchscript(model, args, export_dir, device)
-    print(f"Exported TorchScript model to: {exported}")
-
-
+    if args.task != "jigsaw":
+        export_dir = os.path.join(args.workdir, "export", "torchscript")
+        exported = export_torchscript(model, args, export_dir, device)
+        print(f"Exported TorchScript model to: {exported}")
+    else:
+        print("Skipping TorchScript export for jigsaw.")
+        
 def run_eval(model, val_loader, device, args):
     checkpoints = list_checkpoints(args.workdir)
     if not checkpoints:
@@ -632,8 +634,9 @@ def run_eval(model, val_loader, device, args):
         print("eval:", result)
         results.append(result)
 
-        export_dir = os.path.join(args.workdir, "export", "torchscript")
-        export_torchscript(model, args, export_dir, device)
+        if args.task != "jigsaw":
+            export_dir = os.path.join(args.workdir, "export", "torchscript")
+            export_torchscript(model, args, export_dir, device) 
 
         if os.path.exists(os.path.join(args.workdir, "TRAINING_IS_DONE")):
             break
