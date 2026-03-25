@@ -401,17 +401,35 @@ class JigsawModel(nn.Module):
 
 
 def build_model(args):
+    def _build_from_model_fn(model_fn, extra_kwargs=None):
+        """
+        Build the model from functools.partial returned by get_net(...),
+        but filter kwargs against the actual ResNet constructor, not the
+        thin resnet50(...) wrapper.
+        """
+        merged_kwargs = {}
+        merged_kwargs.update(model_fn.keywords or {})
+        if extra_kwargs:
+            merged_kwargs.update(extra_kwargs)
+
+        target_ctor = model_fn.func
+
+        if getattr(target_ctor, "__name__", "") == "resnet50":
+            from models.pytorch_resnet import ResNet
+            accepted = set(inspect.signature(ResNet.__init__).parameters.keys())
+            accepted.discard("self")
+        else:
+            accepted = set(inspect.signature(target_ctor).parameters.keys())
+
+        filtered_kwargs = {k: v for k, v in merged_kwargs.items() if k in accepted}
+        return target_ctor(*model_fn.args, **filtered_kwargs)
+
     if args.task == "jigsaw":
         permutations = load_permutations(args.permutations_path)
 
+        # For jigsaw, backbone should emit spatial embeddings, not pooled logits.
         model_fn = get_net(args, num_classes=args.embed_dim)
-
-        merged_kwargs = {}
-        merged_kwargs.update(model_fn.keywords or {})
-        merged_kwargs["global_pool"] = False
-
-        # Do NOT filter kwargs here; resnet50 forwards **kwargs into ResNet(...)
-        backbone = model_fn.func(*model_fn.args, **merged_kwargs)
+        backbone = _build_from_model_fn(model_fn, extra_kwargs={"global_pool": False})
 
         model = JigsawModel(
             backbone=backbone,
@@ -427,13 +445,8 @@ def build_model(args):
         num_classes = datasets.get_num_classes(build_data_cfg(args))
 
     model_fn = get_net(args, num_classes=num_classes)
-
-    merged_kwargs = {}
-    merged_kwargs.update(model_fn.keywords or {})
-
-    model = model_fn.func(*model_fn.args, **merged_kwargs)
+    model = _build_from_model_fn(model_fn)
     return model
-
 def infer_targets(batch, args, device):
     images = batch["image"]
 
