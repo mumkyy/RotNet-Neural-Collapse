@@ -20,4 +20,4 @@ class JigsawHead(nn.Module):
         x = self.dropout(x)
         x = self.conv2(x)
 
-        return x.mean(dim=(2,3))  # global average → [B, num_classes]
+        return x.mean(dim=(2,3))  # global average > [B, num_classes]
