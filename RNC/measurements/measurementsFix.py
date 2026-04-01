@@ -467,7 +467,7 @@ def compute_epoch_metrics_multilayer(
         correct += (logits.argmax(1) == y).sum().item()
 
         y_cpu = y.detach().cpu()
-
+    
         hp_cpu = h_pen.detach().cpu()
         for c in range(C):
             idx = (y_cpu == c).nonzero(as_tuple=False).squeeze(1)

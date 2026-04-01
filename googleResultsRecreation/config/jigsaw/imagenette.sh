@@ -8,8 +8,8 @@ python train_and_eval.py \
   --permutations_path /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/permutations_100_max.bin \
   --train_split train \
   --val_split val \
-  --batch_size 128 \
-  --eval_batch_size 8 \
+  --batch_size 32 \
+  --eval_batch_size 4 \
   \
   --architecture resnet50 \
   --filters_factor 8 \
@@ -25,7 +25,7 @@ python train_and_eval.py \
   --embed_dim 1000 \
   \
   --lr 0.1 \
-  --lr_scale_batch_size 256 \
+  --lr_scale_batch_size 64 \
   --decay_epochs 15,25 \
   --epochs 50 \
   --warmup_epochs 5 \
