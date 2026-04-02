@@ -308,7 +308,7 @@ def permute_and_concat_batch_patches(patch_embeddings, perms):
 
     bsz, patch_count, channels, height, width = patch_embeddings.shape
     subset_size, perm_len = perms.shape
-
+    
     if patch_count != perm_len:
         raise ValueError(
             f"Patch count / permutation length mismatch: patches={patch_count}, perm_len={perm_len}"
@@ -335,12 +335,32 @@ class JigsawModel(nn.Module):
         self.register_buffer("permutations", permutations)
         self.perm_subset_size = perm_subset_size
 
-        perm_count, perm_len = permutations.shape
+        # perm_count, perm_len = permutations.shape
+
+        # self.embed_dim = embed_dim
+        # self.head = JigsawHead(
+        #     in_channels=embed_dim * perm_len,
+        #     num_classes=perm_count,
+        # )
+
+        total_perm_count, perm_len = permutations.shape
+        subset_size = min(perm_subset_size, total_perm_count)
         self.perm_len = perm_len
-        self.embed_dim = embed_dim
+        fixed_perm_indices = torch.arange(subset_size)   
+        fixed_perms = permutations[fixed_perm_indices]
+
+        self.register_buffer("fixed_perm_indices", fixed_perm_indices)
+        self.register_buffer("fixed_permutations", fixed_perms)
+        # infer channels dynamically
+        dummy = torch.randn(1, perm_len, 3, 64, 64)
+        with torch.no_grad():
+            flat = dummy.reshape(perm_len, 3, 64, 64)
+            feats = self.backbone(flat)
+            feat_c = feats.shape[1]
+
         self.head = JigsawHead(
-            in_channels=embed_dim * perm_len,
-            num_classes=perm_count,
+            in_channels=feat_c * perm_len,
+            num_classes=subset_size,
         )
 
     def _select_permutation_subset(self, training, device):
@@ -387,17 +407,26 @@ class JigsawModel(nn.Module):
         _, feat_c, feat_h, feat_w = feats.shape
         feats = feats.reshape(bsz, patch_count, feat_c, feat_h, feat_w)
 
-        perm_indices, selected_perms = self._select_permutation_subset(self.training, x.device)
+        #perm_indices, selected_perms = self._select_permutation_subset(self.training, x.device)
+        perm_indices = self.fixed_perm_indices
+        selected_perms = self.fixed_permutations
+
         concat_feats = permute_and_concat_batch_patches(feats, selected_perms)
 
         logits = self.head(concat_feats)
-        labels = perm_indices.repeat(bsz)
+        # labels = perm_indices.repeat(bsz)
+        M = selected_perms.shape[0]
+        labels = torch.arange(M, device=x.device).repeat(bsz)
+        print("logits shape:", logits.shape)
+        print("labels shape:", labels.shape)
+        print("unique labels:", torch.unique(labels))
 
         return {
             "logits": logits,
             "labels": labels,
             "perm_indices": perm_indices,
         }
+    
 
 
 def build_model(args):

@@ -25,7 +25,7 @@ python train_and_eval.py \
   --embed_dim 1000 \
   \
   --lr 0.1 \
-  --lr_scale_batch_size 64 \
+  --lr_scale_batch_size 128 \
   --decay_epochs 15,25 \
   --epochs 50 \
   --warmup_epochs 5 \
