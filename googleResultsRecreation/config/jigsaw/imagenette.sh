@@ -27,7 +27,7 @@ python train_and_eval.py \
   --lr 0.1 \
   --lr_scale_batch_size 128 \
   --decay_epochs 15,25 \
-  --epochs 50 \
+  --epochs 25 \
   --warmup_epochs 5 \
   \
   --serving_input_shape None,64,64,3 \
