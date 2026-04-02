@@ -417,9 +417,9 @@ class JigsawModel(nn.Module):
         # labels = perm_indices.repeat(bsz)
         M = selected_perms.shape[0]
         labels = torch.arange(M, device=x.device).repeat(bsz)
-        print("logits shape:", logits.shape)
-        print("labels shape:", labels.shape)
-        print("unique labels:", torch.unique(labels))
+        # print("logits shape:", logits.shape)
+        # print("labels shape:", labels.shape)
+        # print("unique labels:", torch.unique(labels))
 
         return {
             "logits": logits,
