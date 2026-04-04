@@ -18,7 +18,8 @@ import train_and_eval as te
 # config
 # -----------------------------
 
-WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/jigsaw_imagenette_resnet50_NC10"
+WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/Train_long_jigsaw_imagenette_resnet50_NC10" 
+# results obtained needed to triain longer ^ : "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/jigsaw_imagenette_resnet50_NC10"
 
 LAYER_KEYS = [
     "block1",
