@@ -1,7 +1,7 @@
 #!/bin/sh
 
 python train_and_eval.py \
-  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/jigsaw_imagenette_resnet50_NC10 \
+  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/Train_long_jigsaw_imagenette_resnet50_NC10 \
   --task jigsaw \
   --dataset imagenette \
   --dataset_dir /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160 \
