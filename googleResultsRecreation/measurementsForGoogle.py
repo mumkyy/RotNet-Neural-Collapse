@@ -20,7 +20,7 @@ import train_and_eval as te
 # config
 # ============================================================
 
-WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/jigsaw_imagenette_resnet50_NC10"
+WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/IntermediateKeysExposedJigsawRes50"
 
 USE_SPLIT = "val"
 ONLY_LAST = False
