@@ -267,6 +267,44 @@ class ResNet(nn.Module):
             self.classifier = None
 
         self._build_feature_registry()
+
+    def _make_stage(
+        self,
+        unit,
+        in_channels,
+        filters,
+        num_units,
+        stride,
+        activation_fn=nn.ReLU,
+        normalization=nn.BatchNorm2d,
+    ):
+        layers = []
+
+        layers.append(
+            unit(
+                in_channels=in_channels,
+                filters=filters,
+                stride=stride,
+                activation_fn=activation_fn,
+                normalization=normalization,
+            )
+        )
+
+        current_channels = filters
+
+        for _ in range(1, num_units):
+            layers.append(
+                unit(
+                    in_channels=current_channels,
+                    filters=filters,
+                    stride=1,
+                    activation_fn=activation_fn,
+                    normalization=normalization,
+                )
+            )
+
+        return nn.Sequential(*layers), current_channels
+
     def _build_feature_registry(self):
         self.all_feat_names = []
         self._feature_name_map = {}
@@ -389,7 +427,6 @@ class ResNet(nn.Module):
         if len(outputs) == 1:
             return outputs[0]
         return outputs
-
 
 
 def resnet50(
