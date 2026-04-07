@@ -169,7 +169,7 @@ class ResNet(nn.Module):
         in_channels=3,
         num_layers=(3, 4, 6, 3),
         strides=(2, 2, 2),
-        num_classes=1000,
+        num_classes=10,
         filters_factor=4,
         include_root_block=True,
         root_conv_size=7,
@@ -211,7 +211,7 @@ class ResNet(nn.Module):
                 out_channels=filters,
                 kernel_size=root_conv_size,
                 stride=root_conv_stride,
-                padding=0, 
+                padding=0,
                 bias=False,
             )
             current_channels = filters
@@ -222,14 +222,13 @@ class ResNet(nn.Module):
             self.root_pool = nn.MaxPool2d(
                 kernel_size=root_pool_size,
                 stride=root_pool_stride,
-                padding=0,   
+                padding=0,
             )
 
-        
         num_layers = list(num_layers)
         stage_strides = list(strides)
 
-        filters *= 4  # first bottleneck stage output channels
+        filters *= 4
 
         self.block1, current_channels = self._make_stage(
             unit, current_channels, filters, num_layers[0], stride=1,
@@ -267,40 +266,64 @@ class ResNet(nn.Module):
         else:
             self.classifier = None
 
-    def _make_stage(
-        self,
-        unit,
-        in_channels,
-        filters,
-        num_units,
-        stride,
-        activation_fn,
-        normalization,
-    ):
-        layers = []
-        layers.append(
-            unit(
-                in_channels=in_channels,
-                filters=filters,
-                stride=stride,
-                activation_fn=activation_fn,
-                normalization=normalization,
-            )
-        )
-        for _ in range(num_units - 1):
-            layers.append(
-                unit(
-                    in_channels=filters,
-                    filters=filters,
-                    stride=1,
-                    activation_fn=activation_fn,
-                    normalization=normalization,
-                )
-            )
-        return nn.Sequential(*layers), filters
+        self._build_feature_registry()
+    def _build_feature_registry(self):
+        self.all_feat_names = []
+        self._feature_name_map = {}
 
-    def forward(self, x, return_endpoints=False):
-        end_points = {}
+        if self.include_root_block:
+            self.all_feat_names.append("after_root")
+            self._feature_name_map["after_root"] = None
+
+            self.all_feat_names.append("root_conv")
+            self._feature_name_map["root_conv"] = self.root_conv
+
+            if self.mode == "v1":
+                self.all_feat_names.append("root_bn")
+                self._feature_name_map["root_bn"] = self.root_bn
+
+            self.all_feat_names.append("root_pool")
+            self._feature_name_map["root_pool"] = self.root_pool
+
+        for block_name in ["block1", "block2", "block3", "block4"]:
+            block = getattr(self, block_name)
+            self.all_feat_names.append(block_name)
+            self._feature_name_map[block_name] = block
+
+            for sub_name, mod in block.named_modules():
+                if sub_name == "":
+                    continue
+                full_name = f"{block_name}.{sub_name}"
+                self.all_feat_names.append(full_name)
+                self._feature_name_map[full_name] = mod
+
+        self.all_feat_names.append("pre_logits")
+        self._feature_name_map["pre_logits"] = None
+
+        if self.classifier is not None:
+            self.all_feat_names.append("classifier")
+            self._feature_name_map["classifier"] = self.classifier
+
+    def _parse_out_keys_arg(self, out_feat_keys):
+        out_feat_keys = [self.all_feat_names[-1]] if out_feat_keys is None else out_feat_keys
+
+        if len(out_feat_keys) == 0:
+            raise ValueError("Empty list of output feature keys.")
+
+        for f, key in enumerate(out_feat_keys):
+            if key not in self.all_feat_names:
+                raise ValueError(
+                    f"Feature with name {key} does not exist. Existing features: {self.all_feat_names}."
+                )
+            elif key in out_feat_keys[:f]:
+                raise ValueError(f"Duplicate output feature key: {key}.")
+        return out_feat_keys
+
+    def get_feature_module(self, name):
+        return self._feature_name_map[name]
+
+    def _forward_all_features(self, x):
+        feats = {}
 
         if self.include_root_block:
             x = fixed_padding(x, kernel_size=self.root_conv_size)
@@ -312,19 +335,19 @@ class ResNet(nn.Module):
 
             x = fixed_padding(x, kernel_size=self.root_pool_size)
             x = self.root_pool(x)
-            end_points["after_root"] = x
+            feats["after_root"] = x
 
         x = self.block1(x)
-        end_points["block1"] = x
+        feats["block1"] = x
 
         x = self.block2(x)
-        end_points["block2"] = x
+        feats["block2"] = x
 
         x = self.block3(x)
-        end_points["block3"] = x
+        feats["block3"] = x
 
         x = self.block4(x)
-        end_points["block4"] = x
+        feats["block4"] = x
 
         if self.mode == "v2":
             x = self.postnorm(x)
@@ -332,28 +355,46 @@ class ResNet(nn.Module):
                 x = self.activation(x)
 
         if self.global_pool:
-            x = torch.mean(x, dim=(2, 3), keepdim=True)
-            end_points["pre_logits"] = x.squeeze(-1).squeeze(-1)
+            pooled = torch.mean(x, dim=(2, 3), keepdim=True)
+            feats["pre_logits"] = pooled.squeeze(-1).squeeze(-1)
+            x_for_classifier = pooled
         else:
-            end_points["pre_logits"] = x
+            feats["pre_logits"] = x
+            x_for_classifier = x
 
         if self.classifier is not None:
-            logits = self.classifier(x)
+            logits = self.classifier(x_for_classifier)
             if self.global_pool:
                 logits = logits.squeeze(-1).squeeze(-1)
-            end_points["logits"] = logits
-            if return_endpoints:
-                return logits, end_points
-            return logits
-        else:
-            if return_endpoints:
-                return end_points["pre_logits"], end_points
-            return end_points["pre_logits"]
+            feats["classifier"] = logits
+
+        return feats
+
+    def forward(self, x, out_feat_keys=None, return_endpoints=False):
+        feats = self._forward_all_features(x)
+
+        if return_endpoints:
+            if self.classifier is not None:
+                return feats["classifier"], feats
+            return feats["pre_logits"], feats
+
+        if out_feat_keys is None:
+            if self.classifier is not None:
+                return feats["classifier"]
+            return feats["pre_logits"]
+
+        out_feat_keys = self._parse_out_keys_arg(out_feat_keys)
+        outputs = [feats[k] for k in out_feat_keys]
+
+        if len(outputs) == 1:
+            return outputs[0]
+        return outputs
+
 
 
 def resnet50(
     in_channels=3,
-    num_classes=1000,
+    num_classes=10,
     mode="v2",
     **kwargs,
 ):
