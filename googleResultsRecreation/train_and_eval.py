@@ -268,29 +268,51 @@ def load_permutations(path):
     perms = perms - 1  # Google file is 1-indexed
     return torch.tensor(perms, dtype=torch.long)
 
+import models.jigsaw_head as jighead
 
-class JigsawHead(nn.Module):
-    """
-    Faithful-enough PyTorch head for the Google jigsaw path:
-    concat permuted patch embeddings along channels, then classify permutation.
-    """
+# class JigsawHead(nn.Module):
+#     """
+#     Faithful-enough PyTorch head for the Google jigsaw path:
+#     concat permuted patch embeddings along channels, then classify permutation.
+#     """
 
-    def __init__(self, in_channels, num_classes, hidden_dim=4096, dropout=0.5):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1, bias=True)
-        self.bn1 = nn.BatchNorm2d(hidden_dim)
-        self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout(p=dropout)
-        self.conv2 = nn.Conv2d(hidden_dim, num_classes, kernel_size=1, bias=True)
+#     def __init__(self, in_channels, num_classes, hidden_dim=4096, dropout=0.5):
+#         super().__init__()
+#         self.conv1 = nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1, bias=True)
+#         self.bn1 = nn.BatchNorm2d(hidden_dim)
+#         self.relu = nn.ReLU(inplace=True)
+#         self.dropout = nn.Dropout(p=dropout)
+#         self.conv2 = nn.Conv2d(hidden_dim, num_classes, kernel_size=1, bias=True)
 
-    def forward(self, x):
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.dropout(x)
-        x = self.conv2(x)
-        x = x.mean(dim=(2, 3))
-        return x
+#     def forward(self, x):
+#         x = self.conv1(x)
+#         x = self.bn1(x)
+#         x = self.relu(x)
+#         x = self.dropout(x)
+#         x = self.conv2(x)
+#         x = x.mean(dim=(2, 3))
+#         return x
+
+import models.linearJigsaw_head as linjighead
+
+# class JigsawHeadLinear(nn.Module):
+#     def __init__(self, in_dim, num_classes):
+#         super().__init__()
+
+#         self.lin1 = nn.Linear(in_dim, in_dim)
+#         self.bn1 = nn.BatchNorm1d(in_dim)
+#         self.relu = nn.ReLU()
+#         self.dropout = nn.Dropout(p=0.5)
+#         self.lin2 = nn.Linear(in_dim, num_classes)
+
+#     def forward(self, x):
+#         x = self.lin1(x)
+#         x = self.bn1(x)
+#         x = self.relu(x)
+#         x = self.dropout(x)
+#         x = self.lin2(x)
+#         return x 
+    
 
 
 def permute_and_concat_batch_patches(patch_embeddings, perms):
@@ -308,60 +330,97 @@ def permute_and_concat_batch_patches(patch_embeddings, perms):
 
     bsz, patch_count, channels, height, width = patch_embeddings.shape
     subset_size, perm_len = perms.shape
-    
+
     if patch_count != perm_len:
         raise ValueError(
             f"Patch count / permutation length mismatch: patches={patch_count}, perm_len={perm_len}"
         )
 
-    # [B, M, P, C, H, W]
-    expanded = patch_embeddings.unsqueeze(1).expand(bsz, subset_size, patch_count, channels, height, width)
-
-    # [1, M, P, 1, 1, 1] -> [B, M, P, C, H, W]
+    expanded = patch_embeddings.unsqueeze(1).expand(
+        bsz, subset_size, patch_count, channels, height, width
+    )
     gather_index = perms.view(1, subset_size, perm_len, 1, 1, 1).expand(
         bsz, subset_size, perm_len, channels, height, width
     )
 
     permuted = torch.gather(expanded, dim=2, index=gather_index)
-    concat = permuted.reshape(bsz, subset_size, patch_count * channels, height, width)
-    concat = concat.reshape(bsz * subset_size, patch_count * channels, height, width)
+    concat = permuted.reshape(bsz * subset_size, patch_count * channels, height, width)
+    return concat
+
+
+def permute_and_concat_linear_features(patch_embeddings, perms):
+    """
+    patch_embeddings: [B, P, C]
+    perms: [M, P]
+
+    Returns:
+        [B*M, P*C]
+    """
+    if patch_embeddings.ndim != 3:
+        raise ValueError(f"Expected [B,P,C], got {tuple(patch_embeddings.shape)}")
+    if perms.ndim != 2:
+        raise ValueError(f"Expected [M,P], got {tuple(perms.shape)}")
+
+    bsz, patch_count, channels = patch_embeddings.shape
+    subset_size, perm_len = perms.shape
+
+    if patch_count != perm_len:
+        raise ValueError(
+            f"Patch count / permutation length mismatch: patches={patch_count}, perm_len={perm_len}"
+        )
+
+    expanded = patch_embeddings.unsqueeze(1).expand(
+        bsz, subset_size, patch_count, channels
+    )
+    gather_index = perms.view(1, subset_size, perm_len, 1).expand(
+        bsz, subset_size, perm_len, channels
+    )
+
+    permuted = torch.gather(expanded, dim=2, index=gather_index)
+    concat = permuted.reshape(bsz * subset_size, patch_count * channels)
     return concat
 
 
 class JigsawModel(nn.Module):
-    def __init__(self, backbone, embed_dim, permutations, perm_subset_size):
+    def __init__(self, backbone, embed_dim, permutations, perm_subset_size, linHead):
         super().__init__()
         self.backbone = backbone
         self.register_buffer("permutations", permutations)
         self.perm_subset_size = perm_subset_size
-
-        # perm_count, perm_len = permutations.shape
-
-        # self.embed_dim = embed_dim
-        # self.head = JigsawHead(
-        #     in_channels=embed_dim * perm_len,
-        #     num_classes=perm_count,
-        # )
+        self.linHead = linHead
 
         total_perm_count, perm_len = permutations.shape
         subset_size = min(perm_subset_size, total_perm_count)
         self.perm_len = perm_len
-        fixed_perm_indices = torch.arange(subset_size)   
+        self.embed_dim = embed_dim
+
+        fixed_perm_indices = torch.arange(subset_size, dtype=torch.long)
         fixed_perms = permutations[fixed_perm_indices]
 
         self.register_buffer("fixed_perm_indices", fixed_perm_indices)
         self.register_buffer("fixed_permutations", fixed_perms)
-        # infer channels dynamically
-        dummy = torch.randn(1, perm_len, 3, 64, 64)
-        with torch.no_grad():
-            flat = dummy.reshape(perm_len, 3, 64, 64)
-            feats = self.backbone(flat)
-            feat_c = feats.shape[1]
 
-        self.head = JigsawHead(
-            in_channels=feat_c * perm_len,
-            num_classes=subset_size,
-        )
+        dummy = torch.randn(perm_len, 3, 64, 64)
+        with torch.no_grad():
+            feats = self.backbone(dummy)
+
+        if feats.ndim != 4:
+            raise ValueError(
+                f"Expected backbone to return [P,C,H,W] spatial embeddings for jigsaw head setup, got {tuple(feats.shape)}"
+            )
+
+        feat_c = feats.shape[1]
+
+        if self.linHead:
+            self.head = linjighead.JigsawHeadLinear(
+                in_dim=feat_c * perm_len,
+                num_classes=subset_size,
+            )
+        else:
+            self.head = jighead.JigsawHead(
+                in_channels=feat_c * perm_len,
+                num_classes=subset_size,
+            )
 
     def _select_permutation_subset(self, training, device):
         total = self.permutations.shape[0]
@@ -378,9 +437,10 @@ class JigsawModel(nn.Module):
     def forward(self, x):
         """
         x: [B, P, C, H, W]
-        returns:
+
+        Returns:
             {
-              "logits": [B*M, num_perms],
+              "logits": [B*M, num_classes],
               "labels": [B*M],
               "perm_indices": [M]
             }
@@ -397,7 +457,6 @@ class JigsawModel(nn.Module):
 
         flat = x.reshape(bsz * patch_count, channels, height, width)
 
-        # backbone returns spatial map because we build it with global_pool=False
         feats = self.backbone(flat)
         if feats.ndim != 4:
             raise ValueError(
@@ -405,29 +464,33 @@ class JigsawModel(nn.Module):
             )
 
         _, feat_c, feat_h, feat_w = feats.shape
-        feats = feats.reshape(bsz, patch_count, feat_c, feat_h, feat_w)
 
-        #perm_indices, selected_perms = self._select_permutation_subset(self.training, x.device)
-        perm_indices = self.fixed_perm_indices
-        selected_perms = self.fixed_permutations
+        perm_indices = self.fixed_perm_indices.to(x.device)
+        selected_perms = self.fixed_permutations.to(x.device)
 
-        concat_feats = permute_and_concat_batch_patches(feats, selected_perms)
+        if self.linHead:
+            # [B*P, C, H, W] -> [B*P, C]
+            feats = feats.mean(dim=(2, 3))
+            # [B*P, C] -> [B, P, C]
+            feats = feats.reshape(bsz, patch_count, feat_c)
+            # [B, P, C] + [M, P] -> [B*M, P*C]
+            concat_feats = permute_and_concat_linear_features(feats, selected_perms)
+        else:
+            # [B*P, C, H, W] -> [B, P, C, H, W]
+            feats = feats.reshape(bsz, patch_count, feat_c, feat_h, feat_w)
+            # [B, P, C, H, W] + [M, P] -> [B*M, P*C, H, W]
+            concat_feats = permute_and_concat_batch_patches(feats, selected_perms)
 
         logits = self.head(concat_feats)
-        # labels = perm_indices.repeat(bsz)
-        M = selected_perms.shape[0]
-        labels = torch.arange(M, device=x.device).repeat(bsz)
-        # print("logits shape:", logits.shape)
-        # print("labels shape:", labels.shape)
-        # print("unique labels:", torch.unique(labels))
+
+        m = selected_perms.shape[0]
+        labels = torch.arange(m, device=x.device).repeat(bsz)
 
         return {
             "logits": logits,
             "labels": labels,
             "perm_indices": perm_indices,
         }
-    
-
 
 def build_model(args):
     def _build_from_model_fn(model_fn, extra_kwargs=None):
@@ -465,6 +528,7 @@ def build_model(args):
             embed_dim=args.embed_dim,
             permutations=permutations,
             perm_subset_size=args.perm_subset_size,
+            linHead=args.linearJigsaw_head
         )
         return model
 
@@ -784,6 +848,7 @@ def get_parser():
     parser.add_argument("--filters_factor", type=int, default=4)
     parser.add_argument("--last_relu", type=str2bool, default=True)
     parser.add_argument("--mode", type=str, default="v2")
+    parser.add_argument("--linearJigsaw_head", type=str2bool, default=False)
 
     # Optimization flags.
     parser.add_argument("--batch_size", type=int, required=True)

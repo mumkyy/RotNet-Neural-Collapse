@@ -20,7 +20,10 @@ import train_and_eval as te
 # config
 # ============================================================
 
-WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/IntermediateKeysExposedJigsawRes50"
+WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch"
+
+# ran this and got good results
+# "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/IntermediateKeysExposedJigsawRes50"
 
 USE_SPLIT = "val"
 ONLY_LAST = False
@@ -601,11 +604,48 @@ def finalize_head_means(stats):
 
 @torch.no_grad()
 def compute_direct_nc3_jigsaw_head(model, loader, device, num_classes):
-    if not hasattr(model, "head") or not hasattr(model.head, "conv2"):
-        raise RuntimeError("Expected model.head.conv2 for jigsaw-head NC3.")
+    """
+    Direct NC3 for the active jigsaw head classifier.
+
+    Supports:
+      - conv head: uses head.conv2 and GAP(input to conv2)
+      - linear/MLP head: uses head.lin2 if present, otherwise head.lin1,
+        and uses the pre-activation input to that classifier.
+
+    Returns metrics in the same format as before.
+    """
+    if not hasattr(model, "head"):
+        raise RuntimeError("Expected model.head to exist.")
+
+    classifier_name = None
+    classifier_module = None
+    classifier_type = None
+
+    # Conv jigsaw head
+    if hasattr(model.head, "conv2"):
+        classifier_name = "head.conv2.input"
+        classifier_module = model.head.conv2
+        classifier_type = "conv"
+
+    # Linear / MLP jigsaw head
+    elif hasattr(model.head, "lin2"):
+        classifier_name = "head.lin2.input"
+        classifier_module = model.head.lin2
+        classifier_type = "linear"
+
+    # Fallback for true one-layer linear head
+    elif hasattr(model.head, "lin1"):
+        classifier_name = "head.lin1.input"
+        classifier_module = model.head.lin1
+        classifier_type = "linear"
+
+    else:
+        raise RuntimeError(
+            "Expected jigsaw head to expose either conv2, lin2, or lin1 for direct NC3."
+        )
 
     bank = HookBank()
-    bank.add_forward_prehook("head.conv2.input", model.head.conv2)
+    bank.add_forward_prehook(classifier_name, classifier_module)
 
     stats = init_head_stat_dict(num_classes)
     total_correct = 0
@@ -622,10 +662,14 @@ def compute_direct_nc3_jigsaw_head(model, loader, device, num_classes):
             logits = outputs["logits"]
             y = outputs["labels"].long()
 
-            if "head.conv2.input" not in bank.outputs:
-                raise RuntimeError("Jigsaw head conv2 prehook did not fire.")
+            if classifier_name not in bank.outputs:
+                raise RuntimeError(f"Jigsaw head classifier prehook did not fire for {classifier_name}.")
 
-            feat_cpu = gapify(bank.outputs["head.conv2.input"]).detach().cpu().to(torch.float64)
+            feat = bank.outputs[classifier_name]
+
+            # conv head input is [N, C, H, W] -> GAP to [N, C]
+            # linear head input is already [N, D]
+            feat_cpu = gapify(feat).detach().cpu().to(torch.float64)
             y_cpu = y.detach().cpu()
             update_head_stats(stats, feat_cpu, y_cpu, num_classes)
 
@@ -637,7 +681,11 @@ def compute_direct_nc3_jigsaw_head(model, loader, device, num_classes):
         bank.close()
 
     mu_c, counts = finalize_head_means(stats)
-    W = model.head.conv2.weight.detach().cpu().to(torch.float64).squeeze(-1).squeeze(-1)
+
+    if classifier_type == "conv":
+        W = classifier_module.weight.detach().cpu().to(torch.float64).squeeze(-1).squeeze(-1)
+    else:
+        W = classifier_module.weight.detach().cpu().to(torch.float64)
 
     out = compute_direct_nc3_from_weight_and_means(W=W, mu_c=mu_c, counts=counts)
     out["feature_dim"] = int(stats["feature_dim"])
@@ -646,8 +694,9 @@ def compute_direct_nc3_jigsaw_head(model, loader, device, num_classes):
     out["head_cross_entropy"] = total_loss / max(total_count, 1)
     out["num_examples"] = total_count
     out["weight_shape"] = list(W.shape)
+    out["classifier_name"] = classifier_name
+    out["classifier_type"] = classifier_type
     return out
-
 
 @torch.no_grad()
 def compute_direct_nc3_backbone_classifier(model, loader, device, num_classes):
@@ -766,7 +815,7 @@ def compute_metrics_for_checkpoint(model, loader, device, args, hook_targets, en
         "head_metrics": head_metrics,
         "nc1_metrics": nc1_metrics,
         "nc3_metrics": {
-            "jigsaw_head_conv2": jigsaw_head_nc3,
+            "jigsaw_head_classifier": jigsaw_head_nc3,
             "backbone_classifier": backbone_classifier_nc3,
         },
     }
@@ -1063,7 +1112,7 @@ def main():
         "notes": {
             "nc1": "computed from hooked activations / special endpoints using permutation-example labels",
             "nc3_backbone_classifier": "direct NC3 using backbone.classifier weights and GAP(input to classifier), with current pretext permutation labels expanded over patch-level samples",
-            "nc3_jigsaw_head": "direct NC3 using head.conv2 weights and GAP(input to conv2), with current jigsaw permutation labels",
+            "nc3_jigsaw_head": "direct NC3 using the active jigsaw classifier weights (head.conv2 for conv head, head.lin2/head.lin1 for linear head) and the corresponding classifier input representation",
             "epoch_plots": "produced only when more than one checkpoint is evaluated; with ONLY_LAST=True you will get final-checkpoint layerwise plots and raw granular json",
         },
         "num_checkpoints_evaluated": len(all_records),
