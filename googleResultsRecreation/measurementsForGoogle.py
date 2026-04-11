@@ -20,10 +20,13 @@ import train_and_eval as te
 # config
 # ============================================================
 
-WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch"
+WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_100Epoch"
+
 
 # ran this and got good results
 # "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/IntermediateKeysExposedJigsawRes50"
+# "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch"
+
 
 USE_SPLIT = "val"
 ONLY_LAST = False
@@ -1006,7 +1009,8 @@ def produce_plots(records, outdir, target_names):
         # NC3 vs epoch
         series = OrderedDict()
         series["backbone_classifier"] = [r["nc3_metrics"]["backbone_classifier"]["nc3"] for r in records]
-        series["jigsaw_head_conv2"] = [r["nc3_metrics"]["jigsaw_head_conv2"]["nc3"] for r in records]
+        # series["jigsaw_head_conv2"] = [r["nc3_metrics"]["jigsaw_head_conv2"]["nc3"] for r in records]
+        series["jigsaw_head_classifier"] = [r["nc3_metrics"]["jigsaw_head_classifier"]["nc3"] for r in records]
         plot_overlay(
             xvals=epochs,
             series_dict=series,
