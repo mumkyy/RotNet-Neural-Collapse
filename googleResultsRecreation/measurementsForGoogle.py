@@ -20,12 +20,13 @@ import train_and_eval as te
 # config
 # ============================================================
 
-WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_100Epoch"
+WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_NO_WD" 
 
 
 # ran this and got good results
 # "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/IntermediateKeysExposedJigsawRes50"
 # "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch"
+# "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_100Epoch"
 
 
 USE_SPLIT = "val"
