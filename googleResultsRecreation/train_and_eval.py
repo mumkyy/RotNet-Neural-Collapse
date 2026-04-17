@@ -538,8 +538,8 @@ def build_model(args):
             embed_dim=args.embed_dim,
             permutations=permutations,
             perm_subset_size=args.perm_subset_size,
-            linHead=args.linearJigsaw_head, 
-            linheadDeep_flag=args.deepLinear_head
+            linHead=getattr(args, "linearJigsaw_head", False),
+            linheadDeep_flag=getattr(args, "deepLinear_head", False)
         )
         return model
 
@@ -931,8 +931,8 @@ def get_parser():
     parser.add_argument("--filters_factor", type=int, default=4)
     parser.add_argument("--last_relu", type=str2bool, default=True)
     parser.add_argument("--mode", type=str, default="v2")
-    parser.add_argument("--linearJigsaw_head", type=str2bool, default=False)
-    parser.add_argument("--deepLinear_head", type=str2bool, default=False)
+    parser.add_argument("--linearJigsaw_head", type=str2bool, default=False, required=False)
+    parser.add_argument("--deepLinear_head", type=str2bool, default=False, required=False)
 
     #downstream flags 
     parser.add_argument("--load_model", type=str, required=False, help="Enter relative path to the model")
