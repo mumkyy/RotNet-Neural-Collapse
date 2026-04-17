@@ -1,7 +1,7 @@
 #!/bin/sh
 
 python train_and_eval.py \
-  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_100Epoch \
+  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_deeperNetwork \
   --task jigsaw \
   --dataset imagenette \
   --dataset_dir /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160 \
@@ -24,8 +24,8 @@ python train_and_eval.py \
   --perm_subset_size 10 \
   --lr 0.1 \
   --lr_scale_batch_size 128 \
-  --decay_epochs 60,90,120 \
-  --epochs 100 \
+  --decay_epochs 15,25 \
+  --epochs 40 \
   --warmup_epochs 5 \
   --serving_input_shape None,64,64,3 \
   --linearJigsaw_head True \
