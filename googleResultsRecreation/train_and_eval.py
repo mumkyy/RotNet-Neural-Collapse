@@ -542,8 +542,8 @@ def build_model(args):
             linheadDeep_flag=getattr(args, "deepLinear_head", False)
         )
         #remove after testing
-        print(model)
-        import pdb; pdb.set_trace()
+        # print(model)
+        # import pdb; pdb.set_trace()
         return model
 
     if args.task in ("relative_patch_location", "rotation", "exemplar"):
