@@ -81,10 +81,14 @@ def get_device(num_gpus=1, use_tpu=False):
 
 
 def build_data_cfg(args):
+    preprocessing = args.preprocessing
+    if getattr(args, "task", None) == "downstream" and args.downstream_preprocessing is not None:
+        preprocessing = args.downstream_preprocessing
+
     return SimpleNamespace(
         dataset=args.dataset,
         dataset_dir=args.dataset_dir,
-        preprocessing=args.preprocessing,
+        preprocessing=preprocessing,
         random_seed=args.random_seed,
         num_workers=args.num_workers,
         pin_memory=not args.no_pin_memory,
@@ -313,7 +317,7 @@ import models.linearJigsaw_head as linjighead
 #         x = self.lin2(x)
 #         return x 
     
-
+import models.linearJigsaw_head_Deeper as linjigDeep
 
 def permute_and_concat_batch_patches(patch_embeddings, perms):
     """
@@ -382,13 +386,13 @@ def permute_and_concat_linear_features(patch_embeddings, perms):
 
 
 class JigsawModel(nn.Module):
-    def __init__(self, backbone, embed_dim, permutations, perm_subset_size, linHead):
+    def __init__(self, backbone, embed_dim, permutations, perm_subset_size, linHead, linheadDeep_flag : bool):
         super().__init__()
         self.backbone = backbone
         self.register_buffer("permutations", permutations)
         self.perm_subset_size = perm_subset_size
         self.linHead = linHead
-
+        self.linheadDeep_flag = linheadDeep_flag
         total_perm_count, perm_len = permutations.shape
         subset_size = min(perm_subset_size, total_perm_count)
         self.perm_len = perm_len
@@ -412,10 +416,16 @@ class JigsawModel(nn.Module):
         feat_c = feats.shape[1]
 
         if self.linHead:
-            self.head = linjighead.JigsawHeadLinear(
+            if self.linheadDeep_flag:
+                self.head = linjigDeep.JigsawHeadLinear(
+                    in_dim = feat_c * perm_len, 
+                    num_classes=subset_size,
+                )
+            else:
+                self.head = linjighead.JigsawHeadLinear(
                 in_dim=feat_c * perm_len,
                 num_classes=subset_size,
-            )
+                )
         else:
             self.head = jighead.JigsawHead(
                 in_channels=feat_c * perm_len,
@@ -528,7 +538,8 @@ def build_model(args):
             embed_dim=args.embed_dim,
             permutations=permutations,
             perm_subset_size=args.perm_subset_size,
-            linHead=args.linearJigsaw_head
+            linHead=args.linearJigsaw_head, 
+            linheadDeep_flag=args.deepLinear_head
         )
         return model
 
@@ -536,6 +547,77 @@ def build_model(args):
         num_classes = args.embed_dim if args.embed_dim is not None else 1000
     else:
         num_classes = datasets.get_num_classes(build_data_cfg(args))
+        if args.task.lower() == "downstream":
+            if args.load_model is None:
+                raise ValueError("--load_model not present: must enter a model path to run downstream mode")
+            elif args.layer_extractor is None:
+                raise ValueError("--layer_extractor not present: must enter a layer to register forward hook")
+            else:
+                model_fn = get_net(args, num_classes=args.embed_dim if args.embed_dim is not None else 1000)
+                model = _build_from_model_fn(model_fn, extra_kwargs={"global_pool": False})
+
+                modelPath = Path(str(args.load_model))
+                payload = torch.load(modelPath, map_location="cpu")
+                if "model_state_dict" not in payload:
+                    raise ValueError("Checkpoint missing 'model_state_dict'")
+                model.load_state_dict(payload["model_state_dict"], strict=False)
+                for param in model.parameters():
+                    param.requires_grad = False
+                def add_forward_hook():
+                    def hook(module, inputs, output):
+                        model._extracted_features = output
+                    return hook
+
+                target_module = dict(model.named_modules()).get(args.layer_extractor)
+                if target_module is None:
+                    raise ValueError(f"Layer '{args.layer_extractor}' not found in model")
+
+                target_module.register_forward_hook(add_forward_hook())
+
+                dummy = torch.randn(1, 3, 64, 64)
+                with torch.no_grad():
+                    _ = model(dummy)
+
+                if not hasattr(model, "_extracted_features"):
+                    raise ValueError(
+                        f"Forward hook on layer '{args.layer_extractor}' did not capture any features"
+                    )
+
+                hooked_feats = model._extracted_features
+
+                from models.downstream_head import DownstreamHead
+                from models.downstream_head_linear import DownstreamHeadLinear
+
+                if hooked_feats.ndim == 4:
+                    feat_dim = hooked_feats.shape[1]
+                    head = DownstreamHead(in_channels=feat_dim, num_classes=num_classes)
+                    for param in head.parameters():
+                        param.requires_grad = True
+                elif hooked_feats.ndim == 2:
+                    feat_dim = hooked_feats.shape[1]
+                    head = DownstreamHeadLinear(in_dim=feat_dim, num_classes=num_classes)
+                    for param in head.parameters():
+                        param.requires_grad = True
+                else:
+                    raise ValueError(
+                        f"Unsupported hooked feature shape {tuple(hooked_feats.shape)}. "
+                        "Expected [B,C,H,W] or [B,D]."
+                    )
+
+                class DownstreamModel(nn.Module):
+                    def __init__(self, backbone, head):
+                        super().__init__()
+                        self.backbone = backbone
+                        self.head = head
+
+                    def forward(self, x):
+                        self.backbone.eval()
+                        with torch.no_grad():
+                            _ = self.backbone(x)
+                        feats = self.backbone._extracted_features
+                        return self.head(feats)
+
+                return DownstreamModel(model, head)
 
     model_fn = get_net(args, num_classes=num_classes)
     model = _build_from_model_fn(model_fn)
@@ -824,7 +906,7 @@ def get_parser():
     parser.add_argument("--serving_input_shape", type=parse_shape, default=(None, 64, 64, 3))
     parser.add_argument("--signature", type=str, default=None)
 
-    parser.add_argument("--task", type=str, required=True)
+    parser.add_argument("--task", type=str, required=True, help="Enter 'downstream' exactly like this for downstream classification")
     parser.add_argument("--train_split", type=str, default="train")
     parser.add_argument("--val_split", type=str, default="val")
 
@@ -844,12 +926,18 @@ def get_parser():
     parser.add_argument("--combine_patches", type=str, default=None)
 
     # Model flags.
+
     parser.add_argument("--architecture", type=str, required=True)
     parser.add_argument("--filters_factor", type=int, default=4)
     parser.add_argument("--last_relu", type=str2bool, default=True)
     parser.add_argument("--mode", type=str, default="v2")
     parser.add_argument("--linearJigsaw_head", type=str2bool, default=False)
+    parser.add_argument("--deepLinear_head", type=str2bool, default=False)
 
+    #downstream flags 
+    parser.add_argument("--load_model", type=str, required=False, help="Enter relative path to the model")
+    parser.add_argument("--layer_extractor", type=str, required=False, help="blockX.X.convX or head.convX or classifier or head.linX")
+    parser.add_argument("--downstream_preprocessing", type=str, default=None)
     # Optimization flags.
     parser.add_argument("--batch_size", type=int, required=True)
     parser.add_argument("--decay_epochs", type=parse_int_tuple, default=None)
