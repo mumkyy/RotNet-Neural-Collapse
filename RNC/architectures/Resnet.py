@@ -81,8 +81,9 @@ class ResNet34_NIN_Style(nn.Module):
         # --- Final Classifier Block ---
         blocks.append(nn.Sequential())
         blocks[-1].add_module('GlobalAveragePooling', GlobalAveragePooling())
+        blocks[-1].add_module('lin1', nn.Linear(512*ResNetBasicBlock.exapnsion, 512*ResNetBasicBlock.exapnsion))
         blocks[-1].add_module('Classifier', nn.Linear(512 * ResNetBasicBlock.expansion, num_classes))
-
+        
         # --- EXACT Copy of your NIN Feature Extraction Logic ---
         self._feature_blocks = nn.ModuleList(blocks)
         self.all_feat_names = []
@@ -95,6 +96,7 @@ class ResNet34_NIN_Style(nn.Module):
             self.all_feat_names.append(f'conv{s+1}')
         
         self.all_feat_names.append('penult')
+        self.all_feat_names.append('lin1')
         self.all_feat_names.append('classifier')
 
         self._feature_name_map = {
