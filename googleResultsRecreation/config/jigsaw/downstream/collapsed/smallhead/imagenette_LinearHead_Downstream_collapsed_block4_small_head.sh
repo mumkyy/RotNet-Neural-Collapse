@@ -21,6 +21,6 @@ python train_and_eval.py \
   --warmup_epochs 5 \
   --serving_input_shape None,64,64,3 \
   --load_model /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch/checkpoint_last.pt \
-  --layer_extractor block4
+  --layer_extractor block4 \
   --small_down_head true \
   "$@"
