@@ -590,10 +590,14 @@ def build_model(args):
 
                 from models.downstream_head import DownstreamHead
                 from models.downstream_head_linear import DownstreamHeadLinear
+                from models.downstream_head_small import DownstreamHeadSmall
 
                 if hooked_feats.ndim == 4:
                     feat_dim = hooked_feats.shape[1]
-                    head = DownstreamHead(in_channels=feat_dim, num_classes=num_classes)
+                    if args.small_down_head:
+                        head = DownstreamHeadSmall(in_channels=feat_dim, num_classes=num_classes)
+                    else:
+                        head = DownstreamHead(in_channels=feat_dim, num_classes=num_classes)
                     for param in head.parameters():
                         param.requires_grad = True
                 elif hooked_feats.ndim == 2:
@@ -941,6 +945,8 @@ def get_parser():
     parser.add_argument("--load_model", type=str, required=False, help="Enter relative path to the model")
     parser.add_argument("--layer_extractor", type=str, required=False, help="blockX.X.convX or head.convX or classifier or head.linX")
     parser.add_argument("--downstream_preprocessing", type=str, default=None)
+    parser.add_argument("--small_down_head", type=str2bool, default=False, required=False)
+
     # Optimization flags.
     parser.add_argument("--batch_size", type=int, required=True)
     parser.add_argument("--decay_epochs", type=parse_int_tuple, default=None)
@@ -951,6 +957,7 @@ def get_parser():
     parser.add_argument("--optimizer", type=str, default="sgd")
     parser.add_argument("--warmup_epochs", type=int, default=0)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
+    
 
     # Pre-processing flags.
     parser.add_argument("--crop_size", type=parse_int_or_pair, default=255)
