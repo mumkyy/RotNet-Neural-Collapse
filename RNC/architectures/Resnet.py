@@ -81,7 +81,8 @@ class ResNet34_NIN_Style(nn.Module):
         # --- Final Classifier Block ---
         blocks.append(nn.Sequential())
         blocks[-1].add_module('GlobalAveragePooling', GlobalAveragePooling())
-        blocks[-1].add_module('lin1', nn.Linear(512*ResNetBasicBlock.exapnsion, 512*ResNetBasicBlock.exapnsion))
+        blocks[-1].add_module('lin1', nn.Linear(512*ResNetBasicBlock.expansion, 512*ResNetBasicBlock.expansion))
+        blocks[-1].add_module('lin2', nn.Linear(512*ResNetBasicBlock.expansion, 512*ResNetBasicBlock.expansion))
         blocks[-1].add_module('Classifier', nn.Linear(512 * ResNetBasicBlock.expansion, num_classes))
         
         # --- EXACT Copy of your NIN Feature Extraction Logic ---
@@ -96,12 +97,15 @@ class ResNet34_NIN_Style(nn.Module):
             self.all_feat_names.append(f'conv{s+1}')
         
         self.all_feat_names.append('penult')
-        self.all_feat_names.append('lin1')
+        self.all_feat_names.append('lin1')        
+        self.all_feat_names.append('lin2')
         self.all_feat_names.append('classifier')
 
         self._feature_name_map = {
             "classifier": self._feature_blocks[-1].Classifier, 
-            "penult" : self._feature_blocks[-1].GlobalAveragePooling
+            "penult" : self._feature_blocks[-1].GlobalAveragePooling,
+            "lin1" : self._feature_blocks[-1].lin1,
+            "lin2" : self._feature_blocks[-1].lin2
         }
         
         for i, block in enumerate(self._feature_blocks[:-1]):
@@ -144,13 +148,26 @@ class ResNet34_NIN_Style(nn.Module):
         
         gap = self._feature_blocks[-1].GlobalAveragePooling
         fc  = self._feature_blocks[-1].Classifier
-
+        lin1 =self._feature_blocks[-1].lin1
+        lin2 =self._feature_blocks[-1].lin2
         pen = gap(feat)
         idx = out_index.get('penult')
         if idx is not None:
             out_feats[idx] = pen
 
-        logits = fc(pen)
+
+        h1 = lin1(pen)
+        idx = out_index.get('lin1')
+        if idx is not None:
+            out_feats[idx] = h1
+
+
+        h2 = lin2(h1)
+        idx = out_index.get('lin2')
+        if idx is not None:
+            out_feats[idx] = h2
+
+        logits = fc(h2)
         idx = out_index.get('classifier')
         if idx is not None:
             out_feats[idx] = logits
@@ -235,7 +252,9 @@ class ResNet50_NIN_Style(nn.Module):
         # --- Final Classifier Block ---
         blocks.append(nn.Sequential())
         blocks[-1].add_module('GlobalAveragePooling', GlobalAveragePooling())
-        blocks[-1].add_module('Classifier', nn.Linear(512 * ResNetBottleneckBlock.expansion, num_classes))
+        blocks[-1].add_module('lin1', nn.Linear(512 * ResNetBottleneckBlock.expansion, (512 * ResNetBottleneckBlock.expansion // 2)))
+        blocks[-1].add_module('lin2', nn.Linear((512 * ResNetBottleneckBlock.expansion) // 2, (512 * ResNetBottleneckBlock.expansion // 4)))
+        blocks[-1].add_module('Classifier', nn.Linear((512 * ResNetBottleneckBlock.expansion) // 4, num_classes))
 
 
         # --- EXACT Copy of your NIN Feature Extraction Logic ---
@@ -250,11 +269,15 @@ class ResNet50_NIN_Style(nn.Module):
             self.all_feat_names.append(f'conv{s+1}')
         
         self.all_feat_names.append('penult')
+        self.all_feat_names.append('lin1')
+        self.all_feat_names.append('lin2')
         self.all_feat_names.append('classifier')
 
         self._feature_name_map = {
             "classifier": self._feature_blocks[-1].Classifier, 
-            "penult" : self._feature_blocks[-1].GlobalAveragePooling   
+            "penult" : self._feature_blocks[-1].GlobalAveragePooling,   
+            "lin1": self._feature_blocks[-1].lin1, 
+            "lin2": self._feature_blocks[-1].lin2 
         }
         
         for i, block in enumerate(self._feature_blocks[:-1]):
@@ -296,6 +319,8 @@ class ResNet50_NIN_Style(nn.Module):
                 out_feats[idx] = feat
         
         gap = self._feature_blocks[-1].GlobalAveragePooling
+        lin1= self._feature_blocks[-1].lin1
+        lin2 = self._feature_blocks[-1].lin2
         fc  = self._feature_blocks[-1].Classifier
 
         pen = gap(feat)
@@ -303,7 +328,17 @@ class ResNet50_NIN_Style(nn.Module):
         if idx is not None:
             out_feats[idx] = pen
 
-        logits = fc(pen)
+        h1 = lin1(pen)
+        idx = out_index.get('lin1')
+        if idx is not None: 
+            out_feats[idx] = h1
+
+        h2 = lin2(h1)
+        idx = out_index.get('lin2')
+        if idx is not None: 
+            out_feats[idx] = h2
+
+        logits = fc(h2)
         idx = out_index.get('classifier')
         if idx is not None:
             out_feats[idx] = logits
