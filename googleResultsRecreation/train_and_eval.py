@@ -680,7 +680,12 @@ def compute_outputs_and_loss(model, batch, device, args, criterion):
         outputs = model(images)
         logits = outputs["logits"]
         labels = outputs["labels"].long()
-        loss = criterion(logits, labels)
+        if args.lossFnMSE:
+            targets = nn.functional.one_hot(labels, num_classes=logits.shape[1]).float()
+            loss = criterion(logits, targets)
+        else:
+            loss = criterion(logits, labels)
+
         return logits, labels, loss
 
     images, labels = flatten_patch_batch_if_needed(images, labels)
@@ -691,14 +696,22 @@ def compute_outputs_and_loss(model, batch, device, args, criterion):
             f"Label / logits batch mismatch. labels={tuple(labels.shape)}, logits={tuple(logits.shape)}"
         )
 
-    loss = criterion(logits, labels)
+    if args.lossFnMSE:
+        targets = nn.functional.one_hot(labels, num_classes=logits.shape[1]).float()
+        loss = criterion(logits, targets)
+    else:
+        loss = criterion(logits, labels)
+
     return logits, labels, loss
 
 
 @torch.no_grad()
 def evaluate(model, data_loader, device, args, checkpoint_path=None):
     model.eval()
-    criterion = nn.CrossEntropyLoss()
+    if args.lossFnMSE: 
+        criterion = nn.MSELoss()
+    else: 
+        criterion = nn.CrossEntropyLoss()
 
     total_loss = 0.0
     total_correct = 0
@@ -721,7 +734,10 @@ def evaluate(model, data_loader, device, args, checkpoint_path=None):
 
 
 def train(model, train_loader, val_loader, device, args):
-    criterion = nn.CrossEntropyLoss()
+    if args.lossFnMSE: 
+        criterion = nn.MSELoss() 
+    else: 
+        criterion = nn.CrossEntropyLoss()
     optimizer = get_optimizer(args, model)
 
     base_lr = args.lr * (args.batch_size / args.lr_scale_batch_size)
@@ -743,9 +759,14 @@ def train(model, train_loader, val_loader, device, args):
     Path(args.workdir).mkdir(parents=True, exist_ok=True)
     with open(os.path.join(args.workdir, "args.json"), "w") as f:
         json.dump(vars(args), f, indent=2, default=str)
-
+    
+    top1Acc = [0.0,0]
     done = False
+    epoch_counter = 0
     while not done:
+        epoch_correct = 0
+        epoch_total = 0
+        epoch_counter += 1
         for batch in train_loader:
             epoch_float = global_step / max(updates_per_epoch, 1)
             maybe_adjust_learning_rate(optimizer, base_lr, epoch_float, args)
@@ -757,12 +778,18 @@ def train(model, train_loader, val_loader, device, args):
             loss.backward()
             optimizer.step()
 
+            preds = torch.argmax(logits, dim=1)
             global_step += 1
+
+            epoch_correct += (preds == labels).sum().item()
+            epoch_total += labels.size(0)
+
 
             if global_step % 50 == 0 or global_step == 1:
                 with torch.no_grad():
-                    preds = torch.argmax(logits, dim=1)
+                    # preds = torch.argmax(logits, dim=1)
                     acc = (preds == labels).float().mean().item()
+
 
                 print(
                     f"step={global_step}/{num_steps} "
@@ -780,7 +807,17 @@ def train(model, train_loader, val_loader, device, args):
             if global_step >= num_steps:
                 done = True
                 break
+        averageAccInEpoch = epoch_correct / max(epoch_total, 1)
 
+        print(
+            f"\n\n\n"
+            f"average accuracy for epoch {epoch_counter} is {averageAccInEpoch:.4f}"
+            f"\n\n\n"
+        )
+        if averageAccInEpoch > top1Acc[0]: 
+            top1Acc[0] = averageAccInEpoch
+            top1Acc[1] = epoch_counter
+            
     final_ckpt = save_checkpoint(
         args.workdir,
         global_step,
@@ -912,7 +949,7 @@ def get_parser():
     parser.add_argument("--serving_input_key", type=str, default="image")
     parser.add_argument("--serving_input_shape", type=parse_shape, default=(None, 64, 64, 3))
     parser.add_argument("--signature", type=str, default=None)
-
+    parser.add_argument("--lossFnMSE",type=str2bool, default=False)
     parser.add_argument("--task", type=str, required=True, help="Enter 'downstream' exactly like this for downstream classification")
     parser.add_argument("--train_split", type=str, default="train")
     parser.add_argument("--val_split", type=str, default="val")
