@@ -25,6 +25,7 @@ _CIFAR_DATASET_DIR = './datasets/cifar10'
 _IMAGENET_DATASET_DIR = './datasets/IMAGENET/ILSVRC2012'
 _PLACES205_DATASET_DIR = './datasets/Places205'
 _IMAGENETTE_DATASET_DIR = './datasets/Imagenette/imagenette2-160'
+_STL_DATASET_DIR = './datasets/stl'
 
 
 def buildLabelIndex(labels):
@@ -209,6 +210,43 @@ class GenericDataset(data.Dataset):
             self.transform = transforms.Compose(transforms_list)
             split_data_dir = _IMAGENETTE_DATASET_DIR + '/' + self.split
             self.data = datasets.ImageFolder(split_data_dir, self.transform)
+
+        elif self.dataset_name == 'stl10':
+            self.mean_pix = [0.485, 0.456, 0.406]
+            self.std_pix  = [0.229, 0.224, 0.225]
+
+            crop_sz = 225 if self.pretext_mode == 'jigsaw_9' else 224
+
+            _STL10_VALID_SPLITS = {'train', 'test', 'unlabeled', 'train+unlabeled'}
+            _STL10_TRAIN_SPLITS = {'train', 'unlabeled', 'train+unlabeled'}
+            if self.split not in _STL10_TRAIN_SPLITS:
+                transforms_list = [
+                    transforms.Resize(256),
+                    transforms.CenterCrop(crop_sz),
+                    lambda x: np.asarray(x).copy(),
+                ]
+            else:
+                if self.random_sized_crop:
+                    transforms_list = [
+                        transforms.RandomResizedCrop(crop_sz),
+                        transforms.RandomHorizontalFlip(),
+                        lambda x: np.asarray(x).copy(),
+                    ]
+                else:
+                    transforms_list = [
+                        transforms.Resize(256),
+                        transforms.RandomCrop(crop_sz),
+                        transforms.RandomHorizontalFlip(),
+                        lambda x: np.asarray(x).copy(),
+                    ]
+            self.transform = transforms.Compose(transforms_list)
+            stl_split = self.split if self.split in _STL10_VALID_SPLITS else 'test'
+            self.data = datasets.STL10(
+                _STL_DATASET_DIR,
+                split=stl_split,
+                download=True,
+                transform=self.transform
+            )
         else:
             raise ValueError('Not recognized dataset {0}'.format(self.dataset_name))
         
