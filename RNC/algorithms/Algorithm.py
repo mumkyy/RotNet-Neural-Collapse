@@ -293,9 +293,6 @@ class Algorithm():
             if self.max_metric_val is None or metric_val > self.max_metric_val:
                 self.max_metric_val = metric_val
                 self.best_stats = eval_stats
-                self.save_checkpoint(self.curr_epoch + 1, suffix='.best')
-                #if self.best_epoch is not None:
-                #    self.delete_checkpoint(self.best_epoch + 1, suffix='.best')
                 self.best_epoch = current_epoch
                 self.print_eval_stats_of_best_model()
 
