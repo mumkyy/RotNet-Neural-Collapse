@@ -1,7 +1,7 @@
 #!/bin/sh
 
 python train_and_eval.py \
-  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/DOWNSTREAM_COLLAPSED/LinearHead_Jig9_10Perms_40Epoch/block2_0_conv1_small \
+  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/DOWNSTREAM_COLLAPSED/LinearHead_Jig9_10Perms_40Epoch/block_0_conv1_small \
   --task downstream \
   --architecture resnet50 \
   --dataset imagenette \
