@@ -151,7 +151,6 @@ class Algorithm():
             if self.optimizers[key] is None:
                 continue
             self.save_network(key, epoch, suffix)
-            self.save_optimizer(key, epoch, suffix)
 
     def load_checkpoint(self, epoch, train=True, suffix=''):
         self.logger.info('Load checkpoint of epoch %d' % epoch)
