@@ -14,7 +14,7 @@ def main():
     parser.add_argument('--num_workers', type=int,      default=4,     help='number of data loading workers')
     parser.add_argument('--cuda', dest='cuda', action='store_true')
     parser.add_argument('--no_cuda', dest='cuda', action='store_false')
-    parser.add_argument('--output_model_Path', type=str, required=False, default='', help='If you wanna use scratch storage put the output path as an absolute path here')
+    parser.add_argument('--output_model_path', type=str, required=False, default='', help='If you wanna use scratch storage put the output path as an absolute path here')
     parser.set_defaults(cuda=True)
     parser.add_argument('--disp_step',   type=int,      default=50,    help='display step during training')
     args_opt = parser.parse_args()
@@ -22,8 +22,8 @@ def main():
     exp_config_file = os.path.join('.', 'config', args_opt.exp + '.py')
     config_root_arr = args_opt.exp.split('/')
     cfg_ROOT = config_root_arr[-1]
-    if len(str(args_opt.output_model_Path)) > 1:
-        exp_directory = os.path.join(args_opt.output_model_Path, 'experiments') 
+    if len(str(args_opt.output_model_path)) > 1:
+        exp_directory = os.path.join(args_opt.output_model_path, 'experiments') 
     else: 
         exp_directory = os.path.join('.', 'experiments', cfg_ROOT)
 
