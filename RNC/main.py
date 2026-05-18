@@ -23,7 +23,7 @@ def main():
     config_root_arr = args_opt.exp.split('/')
     cfg_ROOT = config_root_arr[-1]
     if len(str(args_opt.output_model_path)) > 1:
-        exp_directory = os.path.join(args_opt.output_model_path, 'experiments') 
+        exp_directory = os.path.join(args_opt.output_model_path, 'experiments', cfg_ROOT) 
     else: 
         exp_directory = os.path.join('.', 'experiments', cfg_ROOT)
 
