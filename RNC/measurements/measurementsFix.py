@@ -551,8 +551,8 @@ def compute_epoch_metrics_multilayer(
     W = cls_layer.weight.detach().cpu().T
     Wn = W / (W.norm() + eps)
     Mn = Mc / (Mc.norm() + eps)
-    nc3 = (Wn - Mn).pow(2).sum().item()
-
+    # old form of nc3 computed : (Wn - Mn).pow(2).sum().item()
+    nc3 = (Wn - Mn).norm().item()
     acc = correct / float(totalN)
     loss = total_loss / float(totalN)
 
