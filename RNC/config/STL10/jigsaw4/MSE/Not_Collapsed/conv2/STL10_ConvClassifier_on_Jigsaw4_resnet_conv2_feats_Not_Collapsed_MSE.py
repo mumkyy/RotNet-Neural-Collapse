@@ -22,8 +22,8 @@ config['data_test_opt']  = data_test_opt
 config['max_num_epochs'] = 100
 
 networks = {}
-feat_net_opt = {'num_classes': 10, 'num_stages': 4, 'use_avg_on_conv3': False}
-feat_pretrained_file = './experiments/STL10_Jigsaw9_resnet_Not_Collapsed_MSE_Ten_classes_jitter_colordist/model_net_epoch200'
+feat_net_opt = {'num_classes': 4, 'num_stages': 4, 'use_avg_on_conv3': False}
+feat_pretrained_file = './experiments/STL10_Jigsaw4_resnet_Not_Collapsed_MSE_Four_classes_jitter_colordist/model_net_epoch200'
 networks['feat_extractor'] = {'def_file': 'architectures/Resnet.py', 'pretrained': feat_pretrained_file, 'opt': feat_net_opt, 'optim_params': None}
 
 cls_net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(35, 0.1),(70, 0.02),(85, 0.004),(100, 0.0008)]}

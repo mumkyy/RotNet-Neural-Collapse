@@ -30,7 +30,7 @@ config['data_test_opt']  = data_test_opt
 config['max_num_epochs'] = 200
 
 net_opt = {}
-net_opt['num_classes'] = 4
+net_opt['num_classes'] = 10
 net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
