@@ -544,7 +544,7 @@ def compute_direct_nc3_from_weight_and_means(W, mu_c, counts, eps=1e-12):
 
     Wn = Wk / (torch.norm(Wk, p="fro") + eps)
     Mn = Mc / (torch.norm(Mc, p="fro") + eps)
-    nc3 = torch.sum((Wn - Mn) ** 2).item()
+    nc3 = torch.sum((Wn - Mn) ** 2).item() # l2 norm 
 
     w_norms = torch.norm(Wk, dim=1)
     m_norms = torch.norm(Mc, dim=1)
@@ -553,7 +553,7 @@ def compute_direct_nc3_from_weight_and_means(W, mu_c, counts, eps=1e-12):
     if valid.any():
         Wc = Wk[valid] / w_norms[valid].unsqueeze(1)
         Mcn = Mc[valid] / m_norms[valid].unsqueeze(1)
-        mean_cos = torch.sum(Wc * Mcn, dim=1).mean().item()
+        mean_cos = torch.sum(Wc * Mcn, dim=1).mean().item() # cos sim
     else:
         mean_cos = float("nan")
 
