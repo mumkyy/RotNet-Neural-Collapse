@@ -8,6 +8,10 @@ data_train_opt['epoch_size'] = None
 data_train_opt['random_sized_crop'] = False
 data_train_opt['dataset_name'] = 'stl10'
 data_train_opt['split'] = 'unlabeled'
+data_train_opt['pretext_mode'] = 'jigsaw'
+data_train_opt['patch_jitter'] = 2
+data_train_opt['color_distort'] = True
+data_train_opt['color_dist_strength'] = 0.5
 
 data_test_opt = {}
 data_test_opt['batch_size'] = batch_size
@@ -16,6 +20,10 @@ data_test_opt['epoch_size'] = None
 data_test_opt['random_sized_crop'] = False
 data_test_opt['dataset_name'] = 'stl10'
 data_test_opt['split'] = 'test'
+data_test_opt['pretext_mode'] = 'jigsaw'
+data_test_opt['patch_jitter'] = 0
+data_test_opt['color_distort'] = False
+data_test_opt['color_dist_strength'] = 0.0
 
 config['data_train_opt'] = data_train_opt
 config['data_test_opt']  = data_test_opt
@@ -38,6 +46,6 @@ config['nc_reg'] = {
 }
 
 criterions = {}
-criterions['loss'] = {'ctype':'CrossEntropyLoss', 'opt':None}
+criterions['loss'] = {'ctype':'MSELoss', 'opt':None}
 config['criterions'] = criterions
 config['algorithm_type'] = 'ClassificationModel'
