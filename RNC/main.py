@@ -2,7 +2,7 @@ from __future__ import print_function
 import argparse
 import os
 import importlib.util
-
+import json
 import algorithms as alg
 from dataloader import DataLoader, GenericDataset
 
@@ -47,7 +47,13 @@ def main():
     else: 
         global_perms_1based = generate_maximal_hamming_distance_set(net_opt['num_classes'], K=4)
     global_perms = [tuple(x-1 for x in p) for p in global_perms_1based]
-
+    
+    os.makedirs(exp_directory, exist_ok=True)
+    perms_path = os.path.join(exp_directory, 'jigsaw_perms.json')
+    with open(perms_path, 'w', encoding='utf-8') as f:
+        json.dump([list(p) for p in global_perms], f, indent=4)
+    print(f"[main] Saved jigsaw permutations -> {perms_path}")
+    
     dataset_train = GenericDataset(
         dataset_name=data_train_opt['dataset_name'],
         split=data_train_opt['split'],
