@@ -6,7 +6,7 @@ import importlib.util
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
-
+import json
 import numpy as np
 import torch
 import torch.nn as nn
@@ -781,9 +781,11 @@ def main():
             )
         
         with open(perms_path, "r", encoding="utf-8") as f:
-            best_perms = [tuple(p) for p in json.load(f)]
-        print(f"[Perms] Loaded {len(best_perms)} permutations from {perms_path}")
+            bp = json.load(f)
+       
+        best_perms = [tuple(p) for p in bp]
 
+        print(f"[Perms] Loaded {len(best_perms)} permutations from {perms_path}")
         
         if not best_perms:
             raise RuntimeError(f"Failed to build training-time jigsaw perms. File {perms_path} is empty.")
@@ -966,7 +968,7 @@ def main():
     if args.nc4_layerwise:
         payload["nc4_layerwise"] = nc4_layerwise_curves
     #instead of a pkl json is easier to parse and will not require a full datastructure reparse as writing to csv would     
-    import json
+
     with open(out_dir / "metrics.json", "w") as f:
         json.dump(payload, f, indent=2)
     
