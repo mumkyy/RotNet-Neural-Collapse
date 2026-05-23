@@ -39,7 +39,16 @@ def main():
 
     data_train_opt = config['data_train_opt']
     data_test_opt = config['data_test_opt']
-    net_opt = config['networks']['model']['opt']
+
+    if 'model' in config['networks']:
+        net_opt = config['networks']['model']['opt']
+    
+    elif 'feat_extractor' in config['networks']:
+        net_opt = config['networks']['feat_extractor']['opt']
+    
+    else:
+        raise KeyError("Expected config['networks'] to contain either 'model' or 'feat_extractor'.")
+    
     num_imgs_per_cat = data_train_opt['num_imgs_per_cat'] if ('num_imgs_per_cat' in data_train_opt) else None
     from maxHamming import generate_maximal_hamming_distance_set
     if data_train_opt.get('pretext_mode', 'rotation') == 'jigsaw_9': 
