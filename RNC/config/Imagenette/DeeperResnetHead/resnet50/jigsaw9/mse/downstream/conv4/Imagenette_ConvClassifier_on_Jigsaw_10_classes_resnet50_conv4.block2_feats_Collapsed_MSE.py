@@ -24,11 +24,12 @@ config['max_num_epochs'] = 100
 
 networks = {}
 feat_net_opt = {'num_classes': 10, 'num_stages': 4, 'use_avg_on_conv3': False}
+feat_net_opt['arch'] = 'resnet50'
 feat_pretrained_file = '/scratch/amr239/gma35/experiments/Imagenette_Jigsaw9_resnet50_deeperHead_mse_backbone_collapsed_HigherLrandWD/model_net_epoch200'
 networks['feat_extractor'] = {'def_file': 'architectures/Resnet.py', 'pretrained': feat_pretrained_file, 'opt': feat_net_opt,  'optim_params': None} 
 
 cls_net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(35, 0.1),(70, 0.02),(85, 0.004),(100, 0.0008)]}
-cls_net_opt = {'num_classes':10, 'nChannels':256, 'cls_type':'NIN_ConvBlock3'}
+cls_net_opt = {'num_classes':10, 'nChannels':1024, 'cls_type':'NIN_ConvBlock3'}
 networks['classifier'] = {'def_file': 'architectures/NonLinearClassifier.py', 'pretrained': None, 'opt': cls_net_opt, 'optim_params': cls_net_optim_params}
 config['out_feat_keys'] = ['conv4.block2']
 

@@ -24,6 +24,7 @@ config['max_num_epochs'] = 100
 
 networks = {}
 feat_net_opt = {'num_classes': 10, 'num_stages': 4, 'use_avg_on_conv3': False}
+feat_net_opt['arch'] = 'resnet50'
 feat_pretrained_file = '/scratch/amr239/gma35/experiments/Imagenette_Jigsaw9_resnet50_deeperHead_mse_backbone_collapsed_HigherLrandWD/model_net_epoch200'
 networks['feat_extractor'] = {'def_file': 'architectures/Resnet.py', 'pretrained': feat_pretrained_file, 'opt': feat_net_opt,  'optim_params': None} 
 
