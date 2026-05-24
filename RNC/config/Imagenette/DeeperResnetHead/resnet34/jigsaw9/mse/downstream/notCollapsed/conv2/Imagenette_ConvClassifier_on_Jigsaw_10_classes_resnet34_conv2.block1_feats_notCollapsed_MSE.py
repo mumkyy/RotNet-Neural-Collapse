@@ -24,7 +24,7 @@ config['max_num_epochs'] = 100
 
 networks = {}
 feat_net_opt = {'num_classes': 10, 'num_stages': 4, 'use_avg_on_conv3': False}
-feat_pretrained_file = '/scratch/amr239/gma35/experiments/Imagenette_Jigsaw9_resnet34_deeperHead_mse_backbone_not_collapsed/model_net_epoch200'
+feat_pretrained_file = '/scratch/amr239/gma35/experiments/Imagenette_Jigsaw9_resnet34_deeperHead_mse_backbone_not_collapsed_penalty_in_head/model_net_epoch200'
 networks['feat_extractor'] = {'def_file': 'architectures/Resnet.py', 'pretrained': feat_pretrained_file, 'opt': feat_net_opt,  'optim_params': None} 
 
 cls_net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(35, 0.1),(70, 0.02),(85, 0.004),(100, 0.0008)]}
