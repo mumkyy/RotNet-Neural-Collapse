@@ -27,13 +27,13 @@ net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
 networks = {}
-net_optim_params = {'optim_type': 'sgd', 'lr': 0.005, 'momentum':0.9, 'weight_decay': 0, 'nesterov': True, 'LUT_lr':[(0, 0.0001), (10, 0.001), (20, 0.0025), (30, 0.005), (60, 0.001), (120, 0.0002), (160, 0.00004), (200, 0.000008)]}
+net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_decay': 0, 'nesterov': True, 'LUT_lr':[(60, 0.01), (120, 0.002), (160, 0.0004), (200, 0.00008)]}
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt, 'optim_params': net_optim_params}
 config['networks'] = networks
 
 config['nc_reg'] = {
-    'layers': ['conv2','conv3','conv4','conv5','penult'],
-    'weights': {'conv2':0.005,'conv3':0.005,'conv4':0.01,'conv5':0.01,'penult':0.01},
+    'layers': ['conv2','conv3','conv4','conv5','lin1','lin2','classifier'],
+    'weights': {'conv2':0.005,'conv3':0.005,'conv4':0.01,'conv5':0.01,'lin1':0.01,'lin2':0.01,'classifier':0.01},
     'detach_sb': True
 }
 
