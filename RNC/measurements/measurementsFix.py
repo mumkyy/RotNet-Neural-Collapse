@@ -588,7 +588,7 @@ def plot_nc1_layers(save_dir: Path, epochs: List[int], nc1_curves: Dict[str, Lis
     (save_dir / "plots").mkdir(parents=True, exist_ok=True)
     plt.figure()
     for k, vals in nc1_curves.items():
-        plt.plot(epochs, vals, marker="o", label=k)
+        plt.semilogy(epochs, vals, marker="o", label=k)
     plt.xlabel("epoch")
     plt.ylabel("NC1")
     plt.title(title)
@@ -602,7 +602,7 @@ def plot_nc1_by_layer(save_dir: Path, layer_keys: List[str], nc1_vals: List[floa
     (save_dir / "plots").mkdir(parents=True, exist_ok=True)
     plt.figure()
     x = list(range(len(layer_keys)))
-    plt.plot(x, nc1_vals, "bx-")
+    plt.semilogy(x, nc1_vals, "bx-")
     plt.xticks(x, layer_keys, rotation=45, ha="right")
     plt.xlabel("Layer")
     plt.ylabel("NC1")
@@ -973,8 +973,8 @@ def main():
         json.dump(payload, f, indent=2)
     
     # plots
-    plot_and_save(out_dir, epochs_logged, {"accuracy": acc_curve, "loss": loss_curve, "nc3": nc3_curve}, "SimpleNIN")
-    plot_and_save(out_dir, epochs_logged, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, "SimpleNIN")
+    plot_and_save(out_dir, epochs_logged, {"accuracy": acc_curve, "loss": loss_curve, "nc3": nc3_curve}, args.arch_class)
+    plot_and_save(out_dir, epochs_logged, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, args.arch_class)
     if epochs_logged:
         last_epoch = epochs_logged[-1]
         last_vals = [nc1_curves[k][-1] for k in layer_keys]
