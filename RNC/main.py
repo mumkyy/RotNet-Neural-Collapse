@@ -15,6 +15,7 @@ def main():
     parser.add_argument('--cuda', dest='cuda', action='store_true')
     parser.add_argument('--no_cuda', dest='cuda', action='store_false')
     parser.add_argument('--output_model_path', type=str, required=False, default='', help='If you wanna use scratch storage put the output path as an absolute path here')
+    parser.add_argument('--pretrained_path', type=str, required=False, default='', help='Directory for pretrained backbones, replaces ./ in downstream config paths so all model locations stay relative')
     parser.set_defaults(cuda=True)
     parser.add_argument('--disp_step',   type=int,      default=50,    help='display step during training')
     args_opt = parser.parse_args()
@@ -34,6 +35,10 @@ def main():
     config = config_module.config
 
     config['exp_dir'] = exp_directory
+    if args_opt.pretrained_path and 'feat_extractor' in config['networks']:
+        existing = config['networks']['feat_extractor']['pretrained']
+        rel = existing[2:] if existing.startswith('./') else existing
+        config['networks']['feat_extractor']['pretrained'] = os.path.join(args_opt.pretrained_path, rel)
     print("Loading experiment %s from file: %s" % (args_opt.exp, exp_config_file))
     print("Generated logs, snapshots, and model files will be stored on %s" % (config['exp_dir']))
 
