@@ -50,7 +50,7 @@ config['nc_reg'] = {
         'conv5': 0.01,
         'lin1': 1e-3,
         'lin2': 1e-3,
-        'classifier': 5e-3,
+        'classifier': 5e-4,
     },
     'detach_sb': True,
     'inverse': False
