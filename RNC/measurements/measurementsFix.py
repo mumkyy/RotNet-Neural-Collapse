@@ -603,7 +603,7 @@ def plot_nc1_by_layer(save_dir: Path, layer_keys: List[str], nc1_vals: List[floa
     plt.figure()
     x = list(range(len(layer_keys)))
     plt.semilogy(x, nc1_vals, "bx-")
-    plt.xticks(x layer_keys, rotation=45, ha="righ,t")
+    plt.xticks(x, layer_keys, rotation=45, ha="right")
     plt.xlabel("Layer")
     plt.ylabel("NC1")
     plt.title(title)
