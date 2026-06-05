@@ -10,7 +10,7 @@ class TrainSelection():
                  out_path, 
                  global_bs,
                  loss_type="ce",
-                 penalties: dict | None = None,
+                 penalties = None,
                  train_type: str = "coll"):
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
