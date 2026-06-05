@@ -1,7 +1,6 @@
 # library linking
 import torch
 import torch.nn as nn
-from torchvision.transforms import v2
 from torchvision import datasets
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader as Dataloader
