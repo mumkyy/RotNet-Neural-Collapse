@@ -1,3 +1,8 @@
+from common import * 
+from TrainSelection import TrainSelection
+from Measure import Measure
+from ConvNet import ConvNet
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="cifar10", help="dataset name in known datasets [cifar10, imagenette]")
