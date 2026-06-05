@@ -32,7 +32,7 @@ class TrainSelection():
         self.rotated_test_loader = dataloaders.rotated_test_loader
         self.train_loader = dataloaders.trainloader
         self.test_loader = dataloaders.testloader
-
+        self.number_used = dataloaders.image_size
         # Routing training execution path
         if self.train_type.lower() == "coll":
             self.trainLoop(wd=self.wd, lr=self.lr, model=self.model, outPath=self.out_path, loader=self.rotated_train_loader, lossType=self.loss_type)

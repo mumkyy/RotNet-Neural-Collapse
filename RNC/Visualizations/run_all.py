@@ -17,11 +17,14 @@ def main():
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    number_used = 224 if args.dataset.lower() == "imagenette" else 32 if args.dataset.lower() == "cifar10" else 0
+    # change the default to 224 for imagenette if not running on legacy packages
+    number_used = 160 if args.dataset.lower() == "imagenette" else 32 if args.dataset.lower() == "cifar10" else 0
     
     if number_used == 0:
         raise ValueError("Selected dataset is not supported. Choose 'cifar10' or 'imagenette'.")
-        
+    
+
+
     model = ConvNet(number_used).to(device)
     
     # Setup structural penalties if training path is 'not_coll'

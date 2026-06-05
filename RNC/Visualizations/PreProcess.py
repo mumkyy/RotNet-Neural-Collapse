@@ -54,7 +54,7 @@ class PreProcess():
             self.rotated_test_loader = rotated_test_loader 
             self.trainloader = trainloader
             self.testloader = testloader
-
+            self.image_size = 32
         elif self.dataset_name.lower() == "imagenette":
             # Imagenette Legacy Pipeline
             TARGET_RESOLUTION = 224
@@ -67,25 +67,43 @@ class PreProcess():
                     std=[0.229, 0.224, 0.225]
                 )
             ])
-
+            
             val_transforms = train_transforms
+            try:
+                train_dataset = datasets.Imagenette(
+                    root="./data",
+                    split="train",
+                    size="320px",
+                    download=True,
+                    transform=train_transforms
+                )
 
-            train_dataset = datasets.Imagenette(
-                root="./data",
-                split="train",
-                size="320px",
-                download=True,
-                transform=train_transforms
-            )
+                val_dataset = datasets.Imagenette(
+                    root="./data",
+                    split="val",
+                    size="320px",
+                    download=True,
+                    transform=val_transforms
+                )
+                self.image_size = TARGET_RESOLUTION
+            except: 
+                TARGET_RESOLUTION = 160
+                train_transforms = transforms.Compose([
+                    transforms.Resize((TARGET_RESOLUTION, TARGET_RESOLUTION)),
+                    # Fuses v2.ToImage() and v2.ToDtype(scale=True) into one operation
+                    transforms.ToTensor(),
+                    transforms.Normalize(
+                        mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225]
+                    )
+                ])
 
-            val_dataset = datasets.Imagenette(
-                root="./data",
-                split="val",
-                size="320px",
-                download=True,
-                transform=val_transforms
-            )
+                val_transforms = train_transforms
+                train_dataset = datasets.ImageFolder ("../datasets/Imagenette/imagenette2-160/train", transform=train_transforms)
+               
+                val_dataset = datasets.ImageFolder ("../datasets/Imagenette/imagenette2-160/val", transform=val_transforms)
 
+                self.image_size = TARGET_RESOLUTION 
             trainloader = Dataloader(train_dataset, shuffle=True, batch_size=global_bs, num_workers=2)
             testloader = Dataloader(val_dataset, shuffle=False, batch_size=global_bs, num_workers=2)
 
