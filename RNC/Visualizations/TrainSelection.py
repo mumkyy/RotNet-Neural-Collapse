@@ -175,12 +175,12 @@ class TrainSelection():
 
                 running_train_loss += loss.item()
 
-                # Fixed: Logging intervals scaled down from 2000 to 100 for proper dataset matching
+                
                 if (iteration + 1) % 100 == 0:
                     print(f"Epoch: {epoch + 1} | Steps Sampled: {(iteration + 1):5d} | Combined Loss Proxy: {(running_train_loss / 100.0):.4f}")
                     running_train_loss = 0.0
 
-            # Checkpoint management saving
+           
             if (epoch + 1) % 5 == 0 or (epoch + 1) == self.global_epochs:
                 filename = "last.pt" if (epoch + 1) == self.global_epochs else f"epoch_{epoch + 1}.pt"
                 torch.save(model.state_dict(), os.path.join(outPath, filename))

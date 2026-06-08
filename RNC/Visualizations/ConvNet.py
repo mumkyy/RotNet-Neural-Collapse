@@ -33,7 +33,6 @@ class ConvNet(nn.Module):
 
         # Dynamic channel tracking pass
         with torch.no_grad():
-            # Creates a dummy tensor matching your specific dataset resolution
             dummy = torch.zeros(1, 3, input_resolution, input_resolution)
 
             x = F.relu(self.bn1(self.conv1(dummy)))
@@ -57,7 +56,7 @@ class ConvNet(nn.Module):
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, 128)
 
-        # Output 10 classes to match the Imagenette dataset
+        
         self.classifier = nn.Linear(in_features=128, out_features=4)
 
     def forward(self, x, save_deconv=False):
