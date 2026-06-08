@@ -75,7 +75,7 @@ def main():
     print(f"NC1 Metric Scores: {nc1}")
     
 
-    m.plot_nc1_by_layer(nc1, "graphs/collapsed/nc1.pdf", MODEL_PATH)
+    m.plot_nc1_by_layer(nc1, f"graphs/{args.train_type}/nc1.pdf", MODEL_PATH)
 
     # test acc
     with torch.no_grad():
