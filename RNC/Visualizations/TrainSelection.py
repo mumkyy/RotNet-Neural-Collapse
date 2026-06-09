@@ -189,3 +189,4 @@ class TrainSelection():
             if (epoch + 1) % 5 == 0 or (epoch + 1) == self.global_epochs:
                 filename = "last.pt" if (epoch + 1) == self.global_epochs else f"epoch_{epoch + 1}.pt"
                 torch.save(model.state_dict(), os.path.join(outPath, filename))
+
