@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--penalties", default=None, help="dictionary of layer names and weights")
     parser.add_argument("--train_type", type=str, default="coll", help="coll or not_coll")
     parser.add_argument("--global_bs", type=int, default=32, help="batch size to be used in training and test")
+    parser.add_argument("--use_lr_schedule", action="store_true", help="use a default lr scheduler - pass this flag to set true if you would like to ")
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -58,7 +59,8 @@ def main():
         loss_type=args.loss_type,
         penalties=args.penalties,
         train_type=args.train_type,
-        global_bs=args.global_bs
+        global_bs=args.global_bs,
+        lr_scheduler_bool=args.use_lr_schedule
     )
 
     MODEL_PATH = f"{args.out_path}/last.pt"
