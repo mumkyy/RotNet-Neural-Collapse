@@ -40,12 +40,6 @@ net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_dec
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params} 
 config['networks'] = networks
 
-config['nc3_reg'] = {
-    "last_layer": 'lin2', 
-    "classifier": 'classifier' ,
-    "lambdaNC3" : 1e-4
-}
-
 criterions = {}
 criterions['loss'] = {'ctype':'MSELoss', 'opt':None}
 config['criterions'] = criterions
