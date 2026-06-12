@@ -208,7 +208,7 @@ class ClassificationModel(Algorithm):
             diff = left - right
 
             nc3 = diff.norm()
-
+            print(f'NC3 during training: {nc3}')
             loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3 + eps) * -1) 
 
         # --- NC1 penalty ---
