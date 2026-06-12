@@ -40,6 +40,7 @@ net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_dec
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params} 
 config['networks'] = networks
 
+# exact key names from printing the model
 config['nc3_reg'] = {
     'last_layer': '_feature_blocks.5.lin2',
     'classifier': '_feature_blocks.5.Classifier',
