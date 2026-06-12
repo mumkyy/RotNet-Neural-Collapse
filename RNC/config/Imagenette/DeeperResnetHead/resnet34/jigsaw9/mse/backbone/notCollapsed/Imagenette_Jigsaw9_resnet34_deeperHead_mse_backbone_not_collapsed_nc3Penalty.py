@@ -40,19 +40,10 @@ net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_dec
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params} 
 config['networks'] = networks
 
-config['nc_reg'] = {
-    'layers': ['conv2','conv3','conv4','conv5','lin1', 'lin2', 'classifier'],
-    'weights': {
-        'conv2': 0.005,
-        'conv3': 0.005,
-        'conv4': 0.01,
-        'conv5': 0.01,
-        'lin1': 1e-3,
-        'lin2': 1e-3,
-        'classifier': 5e-4,
-    },
-    'detach_sb': True,
-    'inverse': False
+config['nc3_reg'] = {
+    'last_layer': '_feature_blocks.5.lin2',
+    'classifier': '_feature_blocks.5.Classifier',
+    'lambdaNC3': 0.0001,
 }
 
 
