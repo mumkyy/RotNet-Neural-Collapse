@@ -74,10 +74,10 @@ class ClassificationModel(Algorithm):
                     lambda module, input, output, name=self.penult_layer: self.nc3Feats.__setitem__(name, output)
                 )
                 
-                shape_features = self.nc3Feats[penult_feats].size(1)
+                                            # shape_features = self.nc3Feats[penult_feats].size(1)
                 
-                self.runningSum = torch.zeros(1, shape_features, device=self.nc3Feats[penult_feats].device)
-                self.muC = torch.zeros(opt['networks']['opt']['num_classes'], shape_features, device=self.nc3Feats[penult_feats].device)
+                self.runningSum = None   #torch.zeros(1, shape_features, device=self.nc3Feats[penult_feats].device)
+                # self.muCRunningSums = None           #torch.zeros(opt['networks']['opt']['num_classes'], shape_features, device=self.nc3Feats[penult_feats].device)
             else:
                 raise ValueError(f"The classifier layer name or penult layer used for feature extraction (in construction of M_dot) provided does not match the architecture. \n passed Classifier : {classifier_layer} \n passed penult layer : {self.penult_layer} \n not found in \n MODEL : {modules.keys()} ")
 
@@ -146,34 +146,56 @@ class ClassificationModel(Algorithm):
 
             pen_z = self.nc3Feats[self.penult_layer]
 
-            self.runningSum += pen_z.item().sum() # This should sum up each representation in the batch and then add to the running sum 
-            self.seenExamples += pen_z.size(0) # this should be batch size (B)
-            muG = (self.runningSum).copy() / self.seenExamples # divide by number of seen examples
+            if pen_z.dim() == 4:
+                pen_z = pen_z.mean(dim=(2,3))
+            B, D = pen_z.shape
+            C = pred_var.size(1)
 
-            nc3counts = torch.bincount(labels_var, minlength=C).float()
-            batch_sums = pen_z.new_zeros(C, D)
-            batch_sums.index_add_(0, labels_var, z)
-            self.muC = batch_sums / nc3counts.clamp_min(1.0).unsqueeze(1)  # (C, D)
+            if self.runningSum is None:
+                self.runningSum = pen_z.new_zeros(1, D)
 
-            M_dot = torch.zeros(C, pen_z.size(1))
+            # if self.muCRunningSums is None:
+            #     self.muCRunningSums = pen_z.new_zeros(C, D)
 
-            for c in range(self.muC[0]):
-                M_dot[c] = self.muC[c] - muG
+            with torch.no_grad():
+                self.runningSum += pen_z.detach().sum(dim=0, keepdim=True) # This should sum up each representation in the batch and then add to the running sum 
+                self.seenExamples += B 
+                muG = self.runningSum / self.seenExamples 
 
-            WT = (self.W).T 
             
-            Wnorm = torch.norm(self.W, ord='fro')
 
-            M_dotnorm = torch.norm(M_dot, ord='fro')
+
+            nc3counts = torch.bincount(labels_var, minlength=C).float().to(pen_z.device)
+            batch_sums = pen_z.new_zeros(C, D)
+            batch_sums.index_add_(0, labels_var, pen_z)
+            # self.muCRunningSums += batch_sums
+            batch_muC = batch_sums / nc3counts.clamp_min(1.0).unsqueeze(1)  # (C, D)
+
+            M_dot = batch_muC - muG 
+            
+            if self.W.size(0) == C and self.W.size(1) == D:
+                WT = self.W 
+            else:
+                WT = (self.W).T 
+            
+            Wnorm = self.W.norm(dim=1, keepdim=True, p=2).clamp_min(eps)
+
+            M_dotnorm = M_dot.norm(dim=1, keepdim=True, p=2).clamp_min(eps)
+
+            
 
             left = WT / Wnorm
             right = M_dot / M_dotnorm
+
+            present = (nc3counts > 0)
+            left = left[present]
+            right = right[present]
 
             diff = left - right
 
             nc3 = torch.norm(diff, ord='fro')
 
-            loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3) * -1) 
+            loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3 + eps) * -1) 
 
         # --- NC1 penalty ---
         #no warmup
