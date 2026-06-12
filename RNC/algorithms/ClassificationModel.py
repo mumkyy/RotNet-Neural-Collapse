@@ -60,26 +60,32 @@ class ClassificationModel(Algorithm):
         '''
 
         if 'nc3_reg' in opt:
-            self.nc3Feats = {} 
+            self.nc3Feats = {}
             self.seenExamples = 0
+
             model = self.networks['model']
-            modules = dict(model.named_modules())
+
             self.penult_layer = opt['nc3_reg']['last_layer']
             classifier_layer = opt['nc3_reg']['classifier']
-            if (classifier_layer in modules) and (self.penult_layer in modules):
-                classifier_module = modules[classifier_layer]
-                self.W = classifier_module.weight
+
+            try:
                 penult_feats = model.get_feature_module(self.penult_layer)
-                penult_feats.register_forward_hook(
-                    lambda module, input, output, name=self.penult_layer: self.nc3Feats.__setitem__(name, output)
+                classifier_module = model.get_feature_module(classifier_layer)
+            except KeyError as e:
+                raise ValueError(
+                    f"Invalid nc3_reg feature key: {e}. "
+                    f"Passed last_layer={self.penult_layer}, classifier={classifier_layer}. "
+                    f"Available keys: {getattr(model, 'all_feat_names', 'unknown')}"
                 )
-                
-                                            # shape_features = self.nc3Feats[penult_feats].size(1)
-                
-                self.runningSum = None   #torch.zeros(1, shape_features, device=self.nc3Feats[penult_feats].device)
-                # self.muCRunningSums = None           #torch.zeros(opt['networks']['opt']['num_classes'], shape_features, device=self.nc3Feats[penult_feats].device)
-            else:
-                raise ValueError(f"The classifier layer name or penult layer used for feature extraction (in construction of M_dot) provided does not match the architecture. \n passed Classifier : {classifier_layer} \n passed penult layer : {self.penult_layer} \n not found in \n MODEL : {modules.keys()} ")
+
+            self.W = classifier_module.weight
+
+            penult_feats.register_forward_hook(
+                lambda module, input, output, name=self.penult_layer:
+                    self.nc3Feats.__setitem__(name, output)
+            )
+
+            self.runningSum = None
 
     def allocate_tensors(self):
         self.tensors = {}
