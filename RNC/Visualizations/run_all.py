@@ -31,7 +31,7 @@ def main():
     # Setup structural penalties if training path is 'not_coll'
     if args.train_type.lower() == "not_coll" and args.penalties is None:
         p = {}
-        maxPen = 5e-3
+        maxPen = 1e-4
         counter = 0
         for name, module in model.named_modules():
             if isinstance(module, nn.Conv2d):
@@ -42,9 +42,9 @@ def main():
     
         for lin_layer in ["lin1", "lin2", "lin3"]:
             if hasattr(model, lin_layer):
-                p[lin_layer] = 1e-3
+                p[lin_layer] = 1e-4
         if hasattr(model, "classifier"):
-            p["classifier"] = 5e-4
+            p["classifier"] = 5e-5
             
         args.penalties = p
     
