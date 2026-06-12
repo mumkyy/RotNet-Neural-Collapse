@@ -42,8 +42,8 @@ config['networks'] = networks
 
 # exact key names from printing the model
 config['nc3_reg'] = {
-    'last_layer': '_feature_blocks.5.lin2',
-    'classifier': '_feature_blocks.5.Classifier',
+    'last_layer': 'lin2',
+    'classifier': 'classifier',
     'lambdaNC3': 0.0001,
 }
 
