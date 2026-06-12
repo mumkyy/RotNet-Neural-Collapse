@@ -46,6 +46,41 @@ class ClassificationModel(Algorithm):
                     lambda m, i, o, name=layer: self.feats.__setitem__(name, o)
                 )
 
+        '''        
+        NC-3 Regularizer :
+        use in config under [opt][nc3_reg] it should be a dictionary of the following shape 
+        {
+          last_layer: 'name of the penultimate layer to the classifier where the features will be extracted from', 
+          classifier: 'name of the classifier where the weights will come from' ,
+          lambdaNC3 : float 
+        }
+
+        the value of lambdaNC3 which will be the scalar multiple of the log term produced in the 
+        formulation of the penalty : total_loss += (-log(NC-3 + epsilon) * lambdaNC3) 
+        '''
+
+        if 'nc3_reg' in opt:
+            self.nc3Feats = {} 
+            self.seenExamples = 0
+            model = self.networks['model']
+            modules = dict(model.named_modules())
+            self.penult_layer = opt['nc3_reg']['last_layer']
+            classifier_layer = opt['nc3_reg']['classifier']
+            if (classifier_layer in modules) and (self.penult_layer in modules):
+                classifier_module = modules[classifier_layer]
+                self.W = classifier_module.weight
+                penult_feats = model.get_feature_module(self.penult_layer)
+                penult_feats.register_forward_hook(
+                    lambda module, input, output, name=self.penult_layer: self.nc3Feats.__setitem__(name, output)
+                )
+                
+                shape_features = self.nc3Feats[penult_feats].size(1)
+                
+                self.runningSum = torch.zeros(1, shape_features, device=self.nc3Feats[penult_feats].device)
+                self.muC = torch.zeros(opt['networks']['opt']['num_classes'], shape_features, device=self.nc3Feats[penult_feats].device)
+            else:
+                raise ValueError(f"The classifier layer name or penult layer used for feature extraction (in construction of M_dot) provided does not match the architecture. \n passed Classifier : {classifier_layer} \n passed penult layer : {self.penult_layer} \n not found in \n MODEL : {modules.keys()} ")
+
     def allocate_tensors(self):
         self.tensors = {}
         self.tensors['dataX'] = torch.FloatTensor()
@@ -103,6 +138,42 @@ class ClassificationModel(Algorithm):
         nc1_sw_total = 0.0
         nc1_sb_total = 0.0
         nc1_layers = 0
+
+        if do_train and ('nc3_reg' in self.opt): 
+            
+            eps = 1e-6 
+            nc3 = 0.0
+
+            pen_z = self.nc3Feats[self.penult_layer]
+
+            self.runningSum += pen_z.item().sum() # This should sum up each representation in the batch and then add to the running sum 
+            self.seenExamples += pen_z.size(0) # this should be batch size (B)
+            muG = (self.runningSum).copy() / self.seenExamples # divide by number of seen examples
+
+            nc3counts = torch.bincount(labels_var, minlength=C).float()
+            batch_sums = pen_z.new_zeros(C, D)
+            batch_sums.index_add_(0, labels_var, z)
+            self.muC = batch_sums / nc3counts.clamp_min(1.0).unsqueeze(1)  # (C, D)
+
+            M_dot = torch.zeros(C, pen_z.size(1))
+
+            for c in range(self.muC[0]):
+                M_dot[c] = self.muC[c] - muG
+
+            WT = (self.W).T 
+            
+            Wnorm = torch.norm(self.W, ord='fro')
+
+            M_dotnorm = torch.norm(M_dot, ord='fro')
+
+            left = WT / Wnorm
+            right = M_dot / M_dotnorm
+
+            diff = left - right
+
+            nc3 = torch.norm(diff, ord='fro')
+
+            loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3) * -1) 
 
         # --- NC1 penalty ---
         #no warmup
