@@ -207,7 +207,7 @@ class ClassificationModel(Algorithm):
 
             diff = left - right
 
-            nc3 = torch.norm(diff, ord='fro')
+            nc3 = diff.norm()
 
             loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3 + eps) * -1) 
 
