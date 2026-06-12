@@ -55,6 +55,14 @@ class ClassificationModel(Algorithm):
           lambdaNC3 : float 
         }
 
+        example 
+
+        {
+            "last_layer": "lin2", 
+            "classifier": "classifier", 
+            lambdaNC3: 1e-4
+        }
+
         the value of lambdaNC3 which will be the scalar multiple of the log term produced in the 
         formulation of the penalty : total_loss += (-log(NC-3 + epsilon) * lambdaNC3) 
         '''
