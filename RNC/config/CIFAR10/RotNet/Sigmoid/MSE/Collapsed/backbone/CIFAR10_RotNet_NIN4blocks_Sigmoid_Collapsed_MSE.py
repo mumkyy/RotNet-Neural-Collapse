@@ -28,7 +28,7 @@ net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
 networks = {}
-net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(60, 0.1),(120, 0.02),(160, 0.004),(200, 0.0008)]}
+net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(60, 0.01),(120, 0.002),(160, 0.0004),(200, 0.00008)]}
 networks['model'] = {'def_file': 'architectures/NetworkInNetwork_sigmoid.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params} 
 config['networks'] = networks
 

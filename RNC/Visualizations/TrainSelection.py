@@ -11,7 +11,8 @@ class TrainSelection():
                  global_bs,
                  loss_type="ce",
                  penalties = None,
-                 train_type: str = "coll"):
+                 train_type: str = "coll",
+                 lr_scheduler_bool=False):
 
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -25,6 +26,7 @@ class TrainSelection():
         self.train_type = train_type
         self.penalties = penalties
         self.global_bs = global_bs
+        self.lr_scheduler_bool = lr_scheduler_bool
         
         # Preprocess dataloaders
         dataloaders = PreProcess(dataset_name=self.dataset, global_bs=self.global_bs)
@@ -35,19 +37,20 @@ class TrainSelection():
         self.number_used = dataloaders.image_size
         # Routing training execution path
         if self.train_type.lower() == "coll":
-            self.trainLoop(wd=self.wd, lr=self.lr, model=self.model, outPath=self.out_path, loader=self.rotated_train_loader, lossType=self.loss_type)
+            self.trainLoop(wd=self.wd, lr=self.lr, model=self.model, outPath=self.out_path, loader=self.rotated_train_loader, lossType=self.loss_type, lr_scheduler_bool=self.lr_scheduler_bool)
         elif self.train_type.lower() == "not_coll":
-            self.nc1regtrainLoop(wd=self.wd, lr=self.lr, model=self.model, outPath=self.out_path, loader=self.rotated_train_loader, penalties=self.penalties, lossType=self.loss_type)
+            self.nc1regtrainLoop(wd=self.wd, lr=self.lr, model=self.model, outPath=self.out_path, loader=self.rotated_train_loader, penalties=self.penalties, lossType=self.loss_type, lr_scheduler_bool=self.lr_scheduler_bool)
         else:
             raise ValueError(f"Unknown training pipeline type: {self.train_type}")
 
-    def trainLoop(self, wd, lr, model, outPath, loader, lossType):
+    def trainLoop(self, wd, lr, model, outPath, loader, lossType, lr_scheduler_bool=False):
         print("Standard Collapse Training Engine Initiated.")
         os.makedirs(outPath, exist_ok=True)
         
         criterion = nn.MSELoss() if lossType.lower() == "mse" else nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
-
+        if lr_scheduler_bool:
+            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.1)
         model.train()
         for epoch in range(self.global_epochs):
             running_train_loss = 0.0
@@ -93,7 +96,8 @@ class TrainSelection():
                     window_examples = 0.0
 
             print(f"--- Epoch {epoch + 1} Complete. Total Train Accuracy: {100 * (total_correct / examples_seen):.2f}% ---")
-            
+            if lr_scheduler_bool:
+                scheduler.step()
             # Checkpoint management saving
             if (epoch + 1) % 5 == 0 or (epoch + 1) == self.global_epochs:
                 filename = "last.pt" if (epoch + 1) == self.global_epochs else f"epoch_{epoch + 1}.pt"
@@ -101,7 +105,7 @@ class TrainSelection():
                 
         print("Training lifecycle complete.")
 
-    def nc1regtrainLoop(self, wd, lr, model, outPath, loader, penalties, lossType):
+    def nc1regtrainLoop(self, wd, lr, model, outPath, loader, penalties, lossType, lr_scheduler_bool=False):
         print("Anti-Collapse Regularization Training Engine Initiated.")
         feats = {}
         
@@ -117,7 +121,8 @@ class TrainSelection():
         os.makedirs(outPath, exist_ok=True)
         criterion = nn.MSELoss() if lossType.lower() == "mse" else nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=wd)
-
+        if lr_scheduler_bool:
+            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1) 
         model.train()
         for epoch in range(self.global_epochs):
             running_train_loss = 0.0
@@ -179,8 +184,9 @@ class TrainSelection():
                 if (iteration + 1) % 100 == 0:
                     print(f"Epoch: {epoch + 1} | Steps Sampled: {(iteration + 1):5d} | Combined Loss Proxy: {(running_train_loss / 100.0):.4f}")
                     running_train_loss = 0.0
-
-           
+            if lr_scheduler_bool:
+                scheduler.step() 
             if (epoch + 1) % 5 == 0 or (epoch + 1) == self.global_epochs:
                 filename = "last.pt" if (epoch + 1) == self.global_epochs else f"epoch_{epoch + 1}.pt"
                 torch.save(model.state_dict(), os.path.join(outPath, filename))
+

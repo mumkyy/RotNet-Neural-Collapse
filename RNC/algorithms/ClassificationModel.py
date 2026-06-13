@@ -46,6 +46,55 @@ class ClassificationModel(Algorithm):
                     lambda m, i, o, name=layer: self.feats.__setitem__(name, o)
                 )
 
+        '''        
+        NC-3 Regularizer :
+        use in config under [opt][nc3_reg] it should be a dictionary of the following shape 
+        {
+          last_layer: 'name of the penultimate layer to the classifier where the features will be extracted from', 
+          classifier: 'name of the classifier where the weights will come from' ,
+          lambdaNC3 : float 
+        }
+
+        example 
+
+        {
+            "last_layer": "lin2", 
+            "classifier": "classifier", 
+            lambdaNC3: 1e-4
+        }
+
+        the value of lambdaNC3 which will be the scalar multiple of the log term produced in the 
+        formulation of the penalty : total_loss += (-log(NC-3 + epsilon) * lambdaNC3) 
+        '''
+
+        if 'nc3_reg' in opt:
+            self.nc3Feats = {}
+            self.seenExamples = 0
+
+            model = self.networks['model']
+
+            self.penult_layer = opt['nc3_reg']['last_layer']
+            classifier_layer = opt['nc3_reg']['classifier']
+
+            try:
+                penult_feats = model.get_feature_module(self.penult_layer)
+                classifier_module = model.get_feature_module(classifier_layer)
+            except KeyError as e:
+                raise ValueError(
+                    f"Invalid nc3_reg feature key: {e}. "
+                    f"Passed last_layer={self.penult_layer}, classifier={classifier_layer}. "
+                    f"Available keys: {getattr(model, 'all_feat_names', 'unknown')}"
+                )
+
+            self.W = classifier_module.weight
+
+            penult_feats.register_forward_hook(
+                lambda module, input, output, name=self.penult_layer:
+                    self.nc3Feats.__setitem__(name, output)
+            )
+
+            self.runningSum = None
+
     def allocate_tensors(self):
         self.tensors = {}
         self.tensors['dataX'] = torch.FloatTensor()
@@ -103,6 +152,64 @@ class ClassificationModel(Algorithm):
         nc1_sw_total = 0.0
         nc1_sb_total = 0.0
         nc1_layers = 0
+
+        if do_train and ('nc3_reg' in self.opt): 
+            
+            eps = 1e-6 
+            nc3 = 0.0
+
+            pen_z = self.nc3Feats[self.penult_layer]
+
+            if pen_z.dim() == 4:
+                pen_z = pen_z.mean(dim=(2,3))
+            B, D = pen_z.shape
+            C = pred_var.size(1)
+
+            if self.runningSum is None:
+                self.runningSum = pen_z.new_zeros(1, D)
+
+            # if self.muCRunningSums is None:
+            #     self.muCRunningSums = pen_z.new_zeros(C, D)
+
+            with torch.no_grad():
+                self.runningSum += pen_z.detach().sum(dim=0, keepdim=True) # This should sum up each representation in the batch and then add to the running sum 
+                self.seenExamples += B 
+                muG = self.runningSum / self.seenExamples 
+
+            
+
+
+            nc3counts = torch.bincount(labels_var, minlength=C).float().to(pen_z.device)
+            batch_sums = pen_z.new_zeros(C, D)
+            batch_sums.index_add_(0, labels_var, pen_z)
+            # self.muCRunningSums += batch_sums
+            batch_muC = batch_sums / nc3counts.clamp_min(1.0).unsqueeze(1)  # (C, D)
+
+            M_dot = batch_muC - muG 
+            
+            if self.W.size(0) == C and self.W.size(1) == D:
+                WT = self.W 
+            else:
+                WT = (self.W).T 
+            
+            Wnorm = self.W.norm(dim=1, keepdim=True, p=2).clamp_min(eps)
+
+            M_dotnorm = M_dot.norm(dim=1, keepdim=True, p=2).clamp_min(eps)
+
+            
+
+            left = WT / Wnorm
+            right = M_dot / M_dotnorm
+
+            present = (nc3counts > 0)
+            left = left[present]
+            right = right[present]
+
+            diff = left - right
+
+            nc3 = diff.norm()
+            print(f'NC3 during training: {nc3}')
+            loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3 + eps) * -1) 
 
         # --- NC1 penalty ---
         #no warmup
