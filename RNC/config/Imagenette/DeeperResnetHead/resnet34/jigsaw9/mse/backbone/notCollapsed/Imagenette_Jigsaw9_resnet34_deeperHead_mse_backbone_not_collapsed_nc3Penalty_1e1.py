@@ -44,7 +44,7 @@ config['networks'] = networks
 config['nc3_reg'] = {
     'last_layer': 'lin2',
     'classifier': 'classifier',
-    'lambdaNC3': 1,
+    'lambdaNC3': .1,
 }
 
 
