@@ -41,15 +41,10 @@ networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 
 config['networks'] = networks
 
 config['nc_reg'] = {
-    'layers': ['conv2','conv3','conv4','conv5','lin1', 'lin2', 'classifier'],
+    'layers': ['lin2', 'classifier'],
     'weights': {
-        'conv2': 0.005,
-        'conv3': 0.005,
-        'conv4': 0.01,
-        'conv5': 0.01,
-        'lin1': 1e-4,
-        'lin2': 1e-4,
-        'classifier': 5e-5,
+        'lin2': 1e-3,
+        'classifier': 5e-4,
     },
     'detach_sb': True,
     'inverse': False
