@@ -53,7 +53,7 @@ config['nc_reg'] = {
 config['nc3_reg'] = {
     'last_layer': 'conv4.Block4_ConvB3',
     'classifier': 'classifier',
-    'lambdaNC3': -0.01,
+    'lambdaNC3': -0.1,
 }
 
 criterions = {}
