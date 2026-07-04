@@ -311,7 +311,8 @@ def nc2_layerwise(
     device: torch.device,
     eps: float = 1e-12,
 ) -> Dict[str, Dict[str, float]]:
-
+    if means_by_layer is None:
+        raise RuntimeError("Expected means_by_layer but got None.")
     target_cos = -1.0 / float(num_classes - 1)
     out = {}
 
@@ -724,7 +725,55 @@ def plot_layerwise_nc4_final(
     plt.savefig(save_dir / "plots" / "nc4_layerwise_final.pdf")
     plt.close()
 
+def plot_nc2_final(out_dir, layer_keys, nc2_curves, epoch):
+    (out_dir / "plots").mkdir(parents=True, exist_ok=True)
+    x = list(range(len(layer_keys)))
 
+    angular_err = [nc2_curves[k]["angular_abs_err_mean"][-1] for k in layer_keys]
+    equinorm_cv = [nc2_curves[k]["equinorm_cv"][-1] for k in layer_keys]
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(x, angular_err, marker="o", label="mean abs error from ETF cosine")
+    plt.xticks(x, layer_keys, rotation=45, ha="right")
+    plt.xlabel("Layer")
+    plt.ylabel("Equiangular error")
+    plt.title(f"Layerwise NC2 equiangular error at epoch {epoch}")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_dir / "plots" / "nc2_equiangular_error_final.pdf")
+    plt.close()
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(x, equinorm_cv, marker="o", label="equinorm CV")
+    plt.xticks(x, layer_keys, rotation=45, ha="right")
+    plt.xlabel("Layer")
+    plt.ylabel("Equinorm CV")
+    plt.title(f"Layerwise NC2 equinorm error at epoch {epoch}")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_dir / "plots" / "nc2_equinorm_cv_final.pdf")
+    plt.close()
+
+def plot_nc2_layers_over_epochs(save_dir, epochs, nc2_curves, metric_name, ylabel, filename, title):
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+
+    plt.figure(figsize=(10, 5))
+
+    for layer_key, metric_dict in nc2_curves.items():
+        plt.plot(
+            epochs,
+            metric_dict[metric_name],
+            marker="o",
+            label=layer_key,
+        )
+
+    plt.xlabel("Epoch")
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / filename)
+    plt.close()
 # -------------------- CLI --------------------
 
 def parse_args():
@@ -781,6 +830,10 @@ def parse_args():
         action="store_true",
         help="Compute layerwise NC4: NCC match/acc at each requested layer vs final-head predictions",
     )
+
+    # NC2 flags 
+
+    p.add_argument("--nc2", action="store_true", help="Compute and plot NC2 metric layerwise")
 
     # misc
     p.add_argument("--no-cuda", action="store_true")
@@ -930,7 +983,19 @@ def main():
     nc4_layerwise_curves: Dict[str, Dict[str, List[float]]] = {
         k: {"match": [], "mismatch": [], "ncc_acc": []} for k in layer_keys
     }
-
+    nc2_curves = {
+        k: {
+            "equinorm_std": [],
+            "equinorm_cv": [],
+            "equinorm_maxdiff": [],
+            "angular_mean": [],
+            "angular_std": [],
+            "angular_abs_err_mean": [],
+            "angular_abs_err_max": [],
+            "target_cos": [],
+        }
+        for k in layer_keys
+    }
     for ep in epochs:
         ckpt = epoch_to_path[ep]
         print(f"\n[SimpleNIN] epoch {ep} -> {ckpt.name}")
@@ -938,10 +1003,9 @@ def main():
         load_state_dict(model, ckpt)
         model.to(device)
 
-        if args.nc4 or args.nc4_layerwise:
+        if args.nc4 or args.nc4_layerwise or args.nc2:
             want_pen = bool(args.nc4)
-            want_layer_means = bool(args.nc4_layerwise)
-
+            want_layer_means = bool(args.nc4_layerwise or args.nc2)
             ret = compute_epoch_metrics_multilayer(
                 model=model,
                 loader=loader,
@@ -974,7 +1038,17 @@ def main():
                 nc4_mismatch_curve.append(nc4_mismatch)
                 ncc_acc_curve.append(ncc_acc)
                 print(f"[SimpleNIN] nc4_match={nc4_match:.4f} nc4_mismatch={nc4_mismatch:.4f} ncc_acc={ncc_acc:.4f}")
+            if args.nc2:
+                nc2_metrics_ep = nc2_layerwise(
+                    means_by_layer=means_by_layer,
+                    layer_keys=layer_keys,
+                    num_classes=args.num_classes,
+                    device=device,
+                )
 
+                for k in layer_keys:
+                    for metric_name in nc2_curves[k]:
+                        nc2_curves[k][metric_name].append(nc2_metrics_ep[k][metric_name])
             # layerwise NC4 (NEW)
             if args.nc4_layerwise:
                 if means_by_layer is None:
@@ -1036,6 +1110,9 @@ def main():
         payload["ncc_acc"] = ncc_acc_curve
     if args.nc4_layerwise:
         payload["nc4_layerwise"] = nc4_layerwise_curves
+
+    if args.nc2:
+        payload["nc2_by_layer"] = nc2_curves
     #instead of a pkl json is easier to parse and will not require a full datastructure reparse as writing to csv would     
 
     with open(out_dir / "metrics.json", "w") as f:
@@ -1055,6 +1132,29 @@ def main():
     if args.nc4_layerwise and epochs_logged:
         plot_layerwise_nc4_final(out_dir, layer_keys, nc4_layerwise_curves, epochs_logged[-1])
 
+
+    if args.nc2 and epochs_logged:
+        plot_nc2_final(out_dir, layer_keys, nc2_curves, epochs_logged[-1])
+
+        plot_nc2_layers_over_epochs(
+            save_dir=out_dir,
+            epochs=epochs_logged,
+            nc2_curves=nc2_curves,
+            metric_name="angular_abs_err_mean",
+            ylabel="Mean absolute error from ETF cosine",
+            filename="nc2_equiangular_error_over_epochs.pdf",
+            title="Layerwise NC2 equiangular error over epochs",
+        )
+
+        plot_nc2_layers_over_epochs(
+            save_dir=out_dir,
+            epochs=epochs_logged,
+            nc2_curves=nc2_curves,
+            metric_name="equinorm_cv",
+            ylabel="Equinorm CV",
+            filename="nc2_equinorm_cv_over_epochs.pdf",
+            title="Layerwise NC2 equinorm error over epochs",
+        )
     print(f"\n✓ Done. Results in: {out_dir}")
 
 
