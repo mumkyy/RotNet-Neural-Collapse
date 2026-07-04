@@ -303,107 +303,73 @@ def nc4Fun(
     return nc4_match, nc4_mismatch, ncc_acc
 
 
-@torch.no_grad() 
+@torch.no_grad()
 def nc2_layerwise(
-    model: nn.Module,
-    loader,  # callable: loader(epoch) -> iterator
-    means_by_layer: Dict[str, List[torch.Tensor]],  # layer -> [mu_c] (CPU ok)
+    means_by_layer: Dict[str, List[torch.Tensor]],
     layer_keys: List[str],
     num_classes: int,
     device: torch.device,
-) -> Dict[str, Tuple[float, float, float]]:
-    
-    '''
-    NC2 condition - emergence of ETF structure 
+    eps: float = 1e-12,
+) -> Dict[str, Dict[str, float]]:
 
-        || || mu_c^l - mu_G^l ||_2 - || mu_c'^l - mu_G^l ||_2 || -> 0  # classes become equinorm
+    target_cos = -1.0 / float(num_classes - 1)
+    out = {}
 
-        ~mu_c~  =  (mu_c^l - mu_G^l) / (|| mu_c^l - mu_G^l ||_2)
-
-        < ~mu_c~ , ~mu_c'~ > -> - 1 / (C - 1) for c != c' # classes become equiangular 
-
-    '''
-
-    model.eval().to(device)
-
-
-    # stack means on device: Mu[layer] is (C, D_l)
-    #  layer : class wise average feature 
-    Mu: Dict[str, torch.Tensor] = {}
     for k in layer_keys:
         if k not in means_by_layer:
             raise KeyError(f"means_by_layer missing key '{k}'.")
-        Mu[k] = torch.stack([m.to(device) for m in means_by_layer[k]], dim=0)  # (C,D)
 
-    total = 0
-    layerwise_equinorm: Dict[str, int] = {k: 0 for k in layer_keys}
-    layerwise_equanglular: Dict[str, int] = {k: 0 for k in layer_keys}
+        # Muk: (C, D)
+        Muk = torch.stack([m.to(device) for m in means_by_layer[k]], dim=0)
 
-    out_keys = list(layer_keys)
-    if "classifier" not in out_keys:
-        out_keys.append("classifier")
+        if Muk.shape[0] != num_classes:
+            raise RuntimeError(
+                f"Layer {k}: expected {num_classes} class means, got {Muk.shape[0]}"
+            )
 
-    it = loader(0)
-    for x, y in tqdm(it, desc="NC2 layerwise", unit="batch", leave=False):
-        x = x.to(device)
-        y = y.to(device)
+        # global mean: (D,)
+        muG = Muk.mean(dim=0)
 
-        outs = model(x, out_feat_keys=out_keys)
-        if not isinstance(outs, (list, tuple)):
-            raise RuntimeError("Expected model(..., out_feat_keys=...) to return list/tuple aligned with out_keys.")
+        # centered class means: (C, D)
+        M = Muk - muG
 
-        logits = outs[out_keys.index("classifier")]
-        _ = logits.argmax(dim=1) # net_pred
+        # class mean norms: (C,)
+        norms = torch.linalg.norm(M, dim=1)
 
-        total += y.numel()
-        # layerwise operations 
-        for k in layer_keys:
-            feat = outs[out_keys.index(k)]
-            H = gapify(feat)  # (B,D) this is an individual feature reshaped 
-            Muk = Mu[k]  # (C,D) this is a classwise feature mean 
-            MuG = Muk.sum(dim=1) / num_classes # (1,D) global mean is computed as the average of all class means 
+        # equinorm error
+        mean_norm = norms.mean()
+        equinorm_std = norms.std(unbiased=False).item()
+        equinorm_cv = (norms.std(unbiased=False) / (mean_norm + eps)).item()
+        equinorm_maxdiff = (norms.max() - norms.min()).item()
 
-            # compute the l2 norm of every class average feature centered around the global mean 
-            class_norms = []
-            normalized_class_means = []
-            for c in range(Muk[0]): 
-                diff = (Muk[c] - MuG) 
-                l2Diffnorm = torch.linalg.norm(diff) 
-                class_norms[c] = l2Diffnorm
+        # normalized centered class means
+        Mhat = M / (norms[:, None] + eps)
 
-                normalized_class_mean = diff / l2Diffnorm 
-                normalized_class_means[c] = normalized_class_mean
+        # cosine Gram matrix: (C, C)
+        G = Mhat @ Mhat.T
 
-            # for each class store the max norm diff (equinorm) and max norm angle (equiangular)
+        # off-diagonal entries only
+        off_diag_mask = ~torch.eye(num_classes, dtype=torch.bool, device=device)
+        off_diag = G[off_diag_mask]
 
-            for c in range(len(class_norms)): 
+        # equiangular error relative to ETF target
+        angular_mean = off_diag.mean().item()
+        angular_std = off_diag.std(unbiased=False).item()
+        angular_abs_err_mean = (off_diag - target_cos).abs().mean().item()
+        angular_abs_err_max = (off_diag - target_cos).abs().max().item()
 
-                max_diff_norms = 0
-                max_norm_angle = 0 
-                for c_p in range(len(class_norms)): 
-                    diff_norms = torch.linalg.norm(class_norms[c] - class_norms[c_p], ord=1)
-                    if diff_norms > max_diff_norms: 
-                        max_diff_norms = diff_norms
-
-                    angle = torch.linalg.vecdot(normalized_class_means[c], normalized_class_means[c_p])
-                    
-
-
-    if total == 0:
-        raise RuntimeError("nc4_layerwise saw 0 samples.")
-
-    # associate the key with a tuple of nc2 statistics 
-    # stubbed currently 
-    equiangular_gt = float(1 / (num_classes - 1))
-    out: Dict[str, Tuple[float, float, float]] = {}
-    for k in layer_keys:
-        equinorm = layerwise_equinorm[k] 
-        equiangular = layerwise_equanglular[k]
-        diff_angle = equiangular_gt - equiangular
-        out[k] = (equinorm, equiangular, diff_angle)
+        out[k] = {
+            "equinorm_std": equinorm_std,
+            "equinorm_cv": equinorm_cv,
+            "equinorm_maxdiff": equinorm_maxdiff,
+            "angular_mean": angular_mean,
+            "angular_std": angular_std,
+            "angular_abs_err_mean": angular_abs_err_mean,
+            "angular_abs_err_max": angular_abs_err_max,
+            "target_cos": target_cos,
+        }
 
     return out
-
 
 
 # ==================== NEW: layerwise NC4 ====================
