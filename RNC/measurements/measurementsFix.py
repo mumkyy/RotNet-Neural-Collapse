@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from itertools import permutations
 
-
 # -------------------- utils --------------------
 
 def set_seed(seed: int) -> None:
@@ -228,6 +227,122 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
     if feat.dim() == 2:
         return feat
     return feat.flatten(1)
+
+# DONE NEED TO CHECK 
+def find_pabs_weight_module(model, feature_key):
+    module = None
+    # if this function to expose keys is present in the model then we use named keys from the args
+    if hasattr(model, "get_feature_module"):
+        try:
+            module = model.get_feature_module(feature_key)
+        except Exception:
+            module = None
+
+
+    if module is None:
+        modules = dict(model.named_modules())
+        module = modules.get(feature_key, None)
+    if module is None:
+        return None, None
+
+    if isinstance(module, (nn.Conv2d, nn.Linear)):
+        return module, feature_key
+
+    for child_name, child in module.named_modules():
+        if child is module:
+            continue
+
+        if isinstance(child, (nn.Conv2d, nn.Linear)):
+            resolved_name = (
+                f"{feature_key}.{child_name}"
+                if child_name != ""
+                else feature_key
+            )
+            # 	conv1, conv2.block0.conv1 
+            return child, resolved_name
+    return None, None
+
+def weight_module_to_matrix(module, device):
+	W = module.weight.detach().to(device)
+	if isinstance(module, nn.Conv2d):
+		return W.mean(dim=(2,3)) # (out, in)
+	if isinstance(module, nn.Linear):
+		return W
+
+	return W.flatten(start_dim=1)
+
+@torch.no_grad()
+def pabs_layerwise(
+	model,
+	means_by_layer,
+	layer_keys,
+	num_classes,
+	device,
+	eps=1e-12	
+):
+    model.eval().to(device)
+    if means_by_layer is None:
+        raise RuntimeError("Expected means_by_layer in pabs_layerwise but got none")
+
+    out = {}
+
+    for k in layer_keys:
+        if k not in means_by_layer:
+            raise KeyError(f"means_by_layer missing key '{k}'.")
+
+        module, weight_key = find_pabs_weight_module(model, k)
+
+        if module is None:
+            print(f"PABS skipping {k} no conv/linear layer found")
+            continue
+
+        W = weight_module_to_matrix(module, device)
+
+        Muk = torch.stack([m.to(device) for m in means_by_layer[k]], dim=0)
+
+        if Muk.shape[0] != num_classes:
+            raise RuntimeError(
+            f"Layer {k}: expected {num_classes} class means got {Muk.shape[0]}"
+            )
+        if Muk.shape[1] != W.shape[1]:
+            print(
+                f"Skipping {k}: dim mismatch"
+                f"Muk dim={Muk.shape[1]} , W input dim={W.shape[1]}"
+                f"weight_key = {weight_key}"
+            )
+            continue
+
+        M = Muk - Muk.mean(dim=0, keepdim=True) # (C, p_l) 
+        M = M.T 								# (p_l, C)
+
+        Qm = torch.linalg.qr(M, mode="reduced").Q
+
+        # Top-c input subspace of W_l
+
+        _,_, Vh = torch.linalg.svd(W, full_matrices=False)
+        r = min(num_classes, Qm.shape[1], Vh.shape[0])
+
+        if r==0:
+            print(f"skipping {k} it is rank 0")
+            continue
+
+        Qw = Vh[:r].T
+
+        cosines = torch.linalg.svdvals(Qm.T @ Qw) 
+        cosines = cosines[:r].clamp(0.0, 1.0)
+
+        out[k] = {
+            "pabs_mean_cosine": cosines.mean().item(),
+            "pabs_min_cosine": cosines.min().item(),
+            "pabs_max_cosine": cosines.max().item(),
+            "pabs_mean_angle_rad": torch.arccos(cosines).mean().item(),
+            "pabs_max_angle_rad": torch.arccos(cosines).max().item(),
+            "weight_key": weight_key,
+            "weight_shape_0": W.shape[0],
+            "weight_shape_1": W.shape[1],
+        }
+    return out
+
 
 
 @torch.no_grad()
@@ -774,6 +889,77 @@ def plot_nc2_layers_over_epochs(save_dir, epochs, nc2_curves, metric_name, ylabe
     plt.tight_layout()
     plt.savefig(save_dir / "plots" / filename)
     plt.close()
+
+def plot_pabs_final(out_dir, layer_keys, pabs_curves, epoch):
+    (out_dir / "plots").mkdir(parents=True, exist_ok=True)
+
+    valid_layers = [
+        k for k in layer_keys
+        if k in pabs_curves and len(pabs_curves[k]["pabs_mean_cosine"]) > 0
+    ]
+
+    if not valid_layers:
+        print("[PABS] No valid layers to plot.")
+        return
+
+    x = list(range(len(valid_layers)))
+    mean_cos = [pabs_curves[k]["pabs_mean_cosine"][-1] for k in valid_layers]
+    min_cos = [pabs_curves[k]["pabs_min_cosine"][-1] for k in valid_layers]
+
+    plt.figure(figsize=(12, 5))
+    plt.plot(x, mean_cos, marker="o", label="mean principal-angle cosine")
+    plt.plot(x, min_cos, marker="o", label="minimum principal-angle cosine")
+    plt.xticks(x, valid_layers, rotation=45, ha="right")
+    plt.xlabel("Layer")
+    plt.ylabel("PABS cosine")
+    plt.title(f"Layerwise PABS at epoch {epoch}")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(out_dir / "plots" / "pabs_layerwise_final.pdf")
+    plt.close()
+
+
+def plot_pabs_layers_over_epochs(
+    save_dir,
+    epochs,
+    pabs_curves,
+    metric_name,
+    ylabel,
+    filename,
+    title,
+):
+    (save_dir / "plots").mkdir(parents=True, exist_ok=True)
+
+    plt.figure(figsize=(10, 5))
+
+    plotted = False
+
+    for layer_key, metric_dict in pabs_curves.items():
+        vals = metric_dict.get(metric_name, [])
+
+        if len(vals) != len(epochs):
+            continue
+
+        plt.plot(
+            epochs,
+            vals,
+            marker="o",
+            label=layer_key,
+        )
+        plotted = True
+
+    if not plotted:
+        plt.close()
+        print(f"[PABS] No valid curves for {metric_name}.")
+        return
+
+    plt.xlabel("Epoch")
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(save_dir / "plots" / filename)
+    plt.close()
 # -------------------- CLI --------------------
 
 def parse_args():
@@ -834,6 +1020,10 @@ def parse_args():
     # NC2 flags 
 
     p.add_argument("--nc2", action="store_true", help="Compute and plot NC2 metric layerwise")
+
+	# NC3 pabs 
+
+    p.add_argument("--pabs", action="store_true", help="compute pabs layerwise for all layer keys on the first convolutional or linear layer present in each block")
 
     # misc
     p.add_argument("--no-cuda", action="store_true")
@@ -996,6 +1186,18 @@ def main():
         }
         for k in layer_keys
     }
+
+    pabs_curves = {
+        k: {
+            "pabs_mean_cosine": [],
+            "pabs_min_cosine": [],
+            "pabs_max_cosine": [],
+            "pabs_mean_angle_rad": [],
+            "pabs_max_angle_rad": [],
+        }
+        for k in layer_keys
+    }
+
     for ep in epochs:
         ckpt = epoch_to_path[ep]
         print(f"\n[SimpleNIN] epoch {ep} -> {ckpt.name}")
@@ -1003,9 +1205,9 @@ def main():
         load_state_dict(model, ckpt)
         model.to(device)
 
-        if args.nc4 or args.nc4_layerwise or args.nc2:
+        if args.nc4 or args.nc4_layerwise or args.nc2 or args.pabs:
             want_pen = bool(args.nc4)
-            want_layer_means = bool(args.nc4_layerwise or args.nc2)
+            want_layer_means = bool(args.nc4_layerwise or args.nc2 or args.pabs)
             ret = compute_epoch_metrics_multilayer(
                 model=model,
                 loader=loader,
@@ -1049,6 +1251,21 @@ def main():
                 for k in layer_keys:
                     for metric_name in nc2_curves[k]:
                         nc2_curves[k][metric_name].append(nc2_metrics_ep[k][metric_name])
+
+            if args.pabs:
+                pabs_metrics_ep = pabs_layerwise(
+                    model=model,
+                    means_by_layer=means_by_layer,
+                    layer_keys=layer_keys,
+                    num_classes=args.num_classes,
+                    device=device,
+                )
+
+                for k in layer_keys:
+                    if k not in pabs_metrics_ep:
+                        continue
+                    for metric_name in pabs_curves[k]:
+                        pabs_curves[k][metric_name].append(pabs_metrics_ep[k][metric_name])
             # layerwise NC4 (NEW)
             if args.nc4_layerwise:
                 if means_by_layer is None:
@@ -1113,11 +1330,15 @@ def main():
 
     if args.nc2:
         payload["nc2_by_layer"] = nc2_curves
+
+    if args.pabs:
+        payload["pabs_by_layer"] = pabs_curves
+            
     #instead of a pkl json is easier to parse and will not require a full datastructure reparse as writing to csv would     
 
     with open(out_dir / "metrics.json", "w") as f:
         json.dump(payload, f, indent=2)
-    
+
     # plots
     plot_and_save(out_dir, epochs_logged, {"accuracy": acc_curve, "loss": loss_curve, "nc3": nc3_curve}, args.arch_class)
     plot_and_save(out_dir, epochs_logged, {f"nc1_{k}": nc1_curves[k] for k in layer_keys}, args.arch_class)
@@ -1154,6 +1375,44 @@ def main():
             ylabel="Equinorm CV",
             filename="nc2_equinorm_cv_over_epochs.pdf",
             title="Layerwise NC2 equinorm error over epochs",
+        )
+
+    if args.pabs and epochs_logged:
+        plot_pabs_final(
+            out_dir=out_dir,
+            layer_keys=layer_keys,
+            pabs_curves=pabs_curves,
+            epoch=epochs_logged[-1],
+        )
+
+        plot_pabs_layers_over_epochs(
+            save_dir=out_dir,
+            epochs=epochs_logged,
+            pabs_curves=pabs_curves,
+            metric_name="pabs_mean_cosine",
+            ylabel="Mean principal-angle cosine",
+            filename="pabs_mean_cosine_over_epochs.pdf",
+            title="Layerwise PABS mean cosine over epochs",
+        )	
+
+        plot_pabs_layers_over_epochs(
+            save_dir=out_dir,
+            epochs=epochs_logged,
+            pabs_curves=pabs_curves,
+            metric_name="pabs_min_cosine",
+            ylabel="Minimum principal-angle cosine",
+            filename="pabs_min_cosine_over_epochs.pdf",
+            title="Layerwise PABS minimum cosine over epochs",
+        )
+
+        plot_pabs_layers_over_epochs(
+            save_dir=out_dir,
+            epochs=epochs_logged,
+            pabs_curves=pabs_curves,
+            metric_name="pabs_mean_angle_rad",
+            ylabel="Mean principal angle, radians",
+            filename="pabs_mean_angle_over_epochs.pdf",
+            title="Layerwise PABS mean angle over epochs",
         )
     print(f"\n✓ Done. Results in: {out_dir}")
 
