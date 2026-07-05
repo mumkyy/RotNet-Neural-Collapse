@@ -231,36 +231,34 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
 # DONE NEED TO CHECK 
 def find_pabs_weight_module(model, feature_key):
     module = None
-    # if this function to expose keys is present in the model then we use named keys from the args
+
     if hasattr(model, "get_feature_module"):
         try:
             module = model.get_feature_module(feature_key)
         except Exception:
             module = None
 
-
     if module is None:
-        modules = dict(model.named_modules())
-        module = modules.get(feature_key, None)
+        module = dict(model.named_modules()).get(feature_key, None)
+
     if module is None:
         return None, None
 
     if isinstance(module, (nn.Conv2d, nn.Linear)):
         return module, feature_key
 
+    candidates = []
     for child_name, child in module.named_modules():
         if child is module:
             continue
-
         if isinstance(child, (nn.Conv2d, nn.Linear)):
-            resolved_name = (
-                f"{feature_key}.{child_name}"
-                if child_name != ""
-                else feature_key
-            )
-            # 	conv1, conv2.block0.conv1 
-            return child, resolved_name
-    return None, None
+            resolved_name = f"{feature_key}.{child_name}" if child_name else feature_key
+            candidates.append((child, resolved_name))
+
+    if not candidates:
+        return None, None
+
+    return candidates[-1]
 
 def weight_module_to_matrix(module, device):
 	W = module.weight.detach().to(device)
