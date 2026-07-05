@@ -228,59 +228,171 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
         return feat
     return feat.flatten(1)
 
-# DONE NEED TO CHECK 
-def find_pabs_weight_module(model, feature_key):
-    module = None
+# # DONE NEED TO CHECK 
+# def find_pabs_weight_module(model, feature_key):
+#     module = None
 
-    if hasattr(model, "get_feature_module"):
-        try:
-            module = model.get_feature_module(feature_key)
-        except Exception:
-            module = None
+#     if hasattr(model, "get_feature_module"):
+#         try:
+#             module = model.get_feature_module(feature_key)
+#         except Exception:
+#             module = None
 
-    if module is None:
-        module = dict(model.named_modules()).get(feature_key, None)
+#     if module is None:
+#         module = dict(model.named_modules()).get(feature_key, None)
 
-    if module is None:
-        return None, None
+#     if module is None:
+#         return None, None
 
-    if isinstance(module, (nn.Conv2d, nn.Linear)):
-        return module, feature_key
+#     if isinstance(module, (nn.Conv2d, nn.Linear)):
+#         return module, feature_key
 
-    candidates = []
-    for child_name, child in module.named_modules():
-        if child is module:
-            continue
-        if isinstance(child, (nn.Conv2d, nn.Linear)):
-            resolved_name = f"{feature_key}.{child_name}" if child_name else feature_key
-            candidates.append((child, resolved_name))
+#     candidates = []
+#     for child_name, child in module.named_modules():
+#         if child is module:
+#             continue
+#         if isinstance(child, (nn.Conv2d, nn.Linear)):
+#             resolved_name = f"{feature_key}.{child_name}" if child_name else feature_key
+#             candidates.append((child, resolved_name))
 
-    if not candidates:
-        return None, None
+#     if not candidates:
+#         return None, None
 
-    return candidates[-1]
+#     return candidates[-1]
+
+# def weight_module_to_matrix(module, device):
+# 	W = module.weight.detach().to(device)
+# 	if isinstance(module, nn.Conv2d):
+# 		return W.mean(dim=(2,3)) # (out, in)
+# 	if isinstance(module, nn.Linear):
+# 		return W
+
+# 	return W.flatten(start_dim=1)
+
+# @torch.no_grad()
+# def pabs_layerwise(
+# 	model,
+# 	means_by_layer,
+# 	layer_keys,
+# 	num_classes,
+# 	device,
+# 	eps=1e-12	
+# ):
+#     model.eval().to(device)
+#     if means_by_layer is None:
+#         raise RuntimeError("Expected means_by_layer in pabs_layerwise but got none")
+
+#     out = {}
+
+#     for k in layer_keys:
+#         if k not in means_by_layer:
+#             raise KeyError(f"means_by_layer missing key '{k}'.")
+
+#         module, weight_key = find_pabs_weight_module(model, k)
+
+#         if module is None:
+#             print(f"PABS skipping {k} no conv/linear layer found")
+#             continue
+
+#         W = weight_module_to_matrix(module, device)
+
+#         Muk = torch.stack([m.to(device) for m in means_by_layer[k]], dim=0)
+
+#         if Muk.shape[0] != num_classes:
+#             raise RuntimeError(
+#             f"Layer {k}: expected {num_classes} class means got {Muk.shape[0]}"
+#             )
+#         if Muk.shape[1] != W.shape[1]:
+#             print(
+#                 f"Skipping {k}: dim mismatch"
+#                 f"Muk dim={Muk.shape[1]} , W input dim={W.shape[1]}"
+#                 f"weight_key = {weight_key}"
+#             )
+#             continue
+
+#         M = Muk - Muk.mean(dim=0, keepdim=True) # (C, p_l) 
+#         M = M.T 								# (p_l, C)
+
+#         Qm = torch.linalg.qr(M, mode="reduced").Q
+
+#         # Top-c input subspace of W_l
+
+#         _,_, Vh = torch.linalg.svd(W, full_matrices=False)
+#         r = min(num_classes, Qm.shape[1], Vh.shape[0])
+
+#         if r==0:
+#             print(f"skipping {k} it is rank 0")
+#             continue
+
+#         Qw = Vh[:r].T
+
+#         cosines = torch.linalg.svdvals(Qm.T @ Qw) 
+#         cosines = cosines[:r].clamp(0.0, 1.0)
+
+#         out[k] = {
+#             "pabs_mean_cosine": cosines.mean().item(),
+#             "pabs_min_cosine": cosines.min().item(),
+#             "pabs_max_cosine": cosines.max().item(),
+#             "pabs_mean_angle_rad": torch.arccos(cosines).mean().item(),
+#             "pabs_max_angle_rad": torch.arccos(cosines).max().item(),
+#             "weight_key": weight_key,
+#             "weight_shape_0": W.shape[0],
+#             "weight_shape_1": W.shape[1],
+#         }
+#     return out
+
+
+
+def iter_weight_modules_in_order(model):
+    for name, module in model.named_modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            yield name, module
+
 
 def weight_module_to_matrix(module, device):
-	W = module.weight.detach().to(device)
-	if isinstance(module, nn.Conv2d):
-		return W.mean(dim=(2,3)) # (out, in)
-	if isinstance(module, nn.Linear):
-		return W
+    W = module.weight.detach().to(device)
 
-	return W.flatten(start_dim=1)
+    if isinstance(module, nn.Conv2d):
+        return W.mean(dim=(2, 3))  # (out_channels, in_channels)
+
+    if isinstance(module, nn.Linear):
+        return W  # (out_features, in_features)
+
+    return W.flatten(start_dim=1)
+
+
+def find_successor_pabs_weight_module(model, feature_key, feature_dim, device):
+    weights = list(iter_weight_modules_in_order(model))
+
+    # Find where this feature/module appears in the model order.
+    start_idx = 0
+    for i, (name, _) in enumerate(weights):
+        if name.startswith(feature_key):
+            start_idx = i + 1
+            break
+
+    # Prefer a later weight with matching input dimension.
+    for name, module in weights[start_idx:]:
+        W = weight_module_to_matrix(module, device)
+
+        if W.shape[1] == feature_dim:
+            return module, name, W
+
+    return None, None, None
 
 @torch.no_grad()
 def pabs_layerwise(
-	model,
-	means_by_layer,
-	layer_keys,
-	num_classes,
-	device,
-	eps=1e-12	
+    model,
+    means_by_layer,
+    layer_keys,
+    num_classes,
+    device,
+    eps=1e-12,
 ):
     model.eval().to(device)
+
     if means_by_layer is None:
-        raise RuntimeError("Expected means_by_layer in pabs_layerwise but got none")
+        raise RuntimeError("Expected means_by_layer in pabs_layerwise but got None.")
 
     out = {}
 
@@ -288,45 +400,49 @@ def pabs_layerwise(
         if k not in means_by_layer:
             raise KeyError(f"means_by_layer missing key '{k}'.")
 
-        module, weight_key = find_pabs_weight_module(model, k)
-
-        if module is None:
-            print(f"PABS skipping {k} no conv/linear layer found")
+        if k == "classifier":
+            print("[PABS] Skipping classifier: use M(lin2) against W(classifier), not M(classifier).")
             continue
-
-        W = weight_module_to_matrix(module, device)
 
         Muk = torch.stack([m.to(device) for m in means_by_layer[k]], dim=0)
 
         if Muk.shape[0] != num_classes:
             raise RuntimeError(
-            f"Layer {k}: expected {num_classes} class means got {Muk.shape[0]}"
+                f"Layer {k}: expected {num_classes} class means, got {Muk.shape[0]}"
             )
-        if Muk.shape[1] != W.shape[1]:
-            print(
-                f"Skipping {k}: dim mismatch"
-                f"Muk dim={Muk.shape[1]} , W input dim={W.shape[1]}"
-                f"weight_key = {weight_key}"
-            )
+
+        feature_dim = Muk.shape[1]
+
+        module, weight_key, W = find_successor_pabs_weight_module(
+            model=model,
+            feature_key=k,
+            feature_dim=feature_dim,
+            device=device,
+        )
+
+        if module is None or W is None:
+            print(f"[PABS] Skipping {k}: no successor Conv2d/Linear with input dim {feature_dim}.")
             continue
 
-        M = Muk - Muk.mean(dim=0, keepdim=True) # (C, p_l) 
-        M = M.T 								# (p_l, C)
+        # M_l: (p_l, C)
+        M = Muk - Muk.mean(dim=0, keepdim=True)  # (C, p_l)
+        M = M.T                                  # (p_l, C)
 
         Qm = torch.linalg.qr(M, mode="reduced").Q
 
-        # Top-c input subspace of W_l
+        # W_l+1: (p_{l+1}, p_l)
+        _, _, Vh = torch.linalg.svd(W, full_matrices=False)
 
-        _,_, Vh = torch.linalg.svd(W, full_matrices=False)
         r = min(num_classes, Qm.shape[1], Vh.shape[0])
 
-        if r==0:
-            print(f"skipping {k} it is rank 0")
+        if r == 0:
+            print(f"[PABS] Skipping {k}: rank 0.")
             continue
 
-        Qw = Vh[:r].T
+        # Top-r input subspace of successor W
+        Qw = Vh[:r].T  # (p_l, r)
 
-        cosines = torch.linalg.svdvals(Qm.T @ Qw) 
+        cosines = torch.linalg.svdvals(Qm.T @ Qw)
         cosines = cosines[:r].clamp(0.0, 1.0)
 
         out[k] = {
@@ -339,9 +455,8 @@ def pabs_layerwise(
             "weight_shape_0": W.shape[0],
             "weight_shape_1": W.shape[1],
         }
+
     return out
-
-
 
 @torch.no_grad()
 def nc4Fun(
