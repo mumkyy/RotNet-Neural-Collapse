@@ -340,9 +340,6 @@ def gapify(feat: torch.Tensor) -> torch.Tensor:
 #             "weight_shape_1": W.shape[1],
 #         }
 #     return out
-
-
-
 def iter_weight_modules_in_order(model):
     for name, module in model.named_modules():
         if isinstance(module, (nn.Conv2d, nn.Linear)):
@@ -350,35 +347,163 @@ def iter_weight_modules_in_order(model):
 
 
 def weight_module_to_matrix(module, device):
-    W = module.weight.detach().to(device)
+    """
+    Return the current layer's weight as:
+
+        W_l: (output_dimension, input_dimension)
+
+    For Conv2d, the input dimension includes channels and spatial kernel
+    positions. The left singular vectors therefore live in output-channel
+    space, matching globally pooled output class means.
+    """
+    W = module.weight.detach().to(
+        device=device,
+        dtype=torch.float64,
+    )
 
     if isinstance(module, nn.Conv2d):
-        return W.mean(dim=(2, 3))  # (out_channels, in_channels)
+        return W.flatten(start_dim=1)
 
     if isinstance(module, nn.Linear):
-        return W  # (out_features, in_features)
+        return W
 
-    return W.flatten(start_dim=1)
+    raise TypeError(
+        f"Unsupported weight module: {type(module).__name__}"
+    )
 
 
-def find_successor_pabs_weight_module(model, feature_key, feature_dim, device):
-    weights = list(iter_weight_modules_in_order(model))
+def find_current_pabs_weight_module(
+    model,
+    feature_key,
+    feature_dim,
+    device,
+):
+    """
+    Resolve the Conv2d/Linear associated with the current feature.
 
-    # Find where this feature/module appears in the model order.
-    start_idx = 0
-    for i, (name, _) in enumerate(weights):
-        if name.startswith(feature_key):
-            start_idx = i + 1
-            break
+    Resolution order:
+      1. Exact model.named_modules() name.
+      2. Public model._feature_name_map entry.
+      3. model.get_feature_module(feature_key).
+      4. Final main-path Conv2d/Linear inside the resolved container.
+    """
+    named_modules = dict(model.named_modules())
 
-    # Prefer a later weight with matching input dimension.
-    for name, module in weights[start_idx:]:
+    def package(module, fallback_name):
+        if not isinstance(module, (nn.Conv2d, nn.Linear)):
+            return None
+
         W = weight_module_to_matrix(module, device)
 
-        if W.shape[1] == feature_dim:
-            return module, name, W
+        # Current output means must live in the row/output dimension of W.
+        if W.shape[0] != feature_dim:
+            return None
+
+        registered_name = next(
+            (
+                name
+                for name, candidate in named_modules.items()
+                if candidate is module
+            ),
+            fallback_name,
+        )
+
+        return module, registered_name, W
+
+    # Exact registered module name.
+    exact_module = named_modules.get(feature_key)
+    result = package(exact_module, feature_key)
+
+    if result is not None:
+        return result
+
+    # Public feature-name mapping.
+    target_module = None
+
+    if hasattr(model, "_feature_name_map"):
+        target_module = model._feature_name_map.get(feature_key)
+
+    if target_module is None and hasattr(model, "get_feature_module"):
+        try:
+            target_module = model.get_feature_module(feature_key)
+        except (KeyError, ValueError, AttributeError):
+            target_module = None
+
+    result = package(target_module, feature_key)
+
+    if result is not None:
+        return result
+
+    if target_module is None:
+        return None, None, None
+
+    # The feature represents a container, such as a residual block or stage.
+    candidates = []
+
+    for local_name, module in target_module.named_modules():
+        result = package(
+            module,
+            (
+                f"{feature_key}.{local_name}"
+                if local_name
+                else feature_key
+            ),
+        )
+
+        if result is None:
+            continue
+
+        # Do not associate a whole residual-block output with its shortcut
+        # projection unless the shortcut was explicitly requested by name.
+        normalized_name = local_name.lower()
+
+        is_shortcut = (
+            "shortcut" in normalized_name
+            or "downsample" in normalized_name
+        )
+
+        candidates.append((result, is_shortcut))
+
+    main_path_candidates = [
+        result
+        for result, is_shortcut in candidates
+        if not is_shortcut
+    ]
+
+    if main_path_candidates:
+        return main_path_candidates[-1]
+
+    if candidates:
+        return candidates[-1][0]
 
     return None, None, None
+
+
+def svd_numerical_rank(singular_values, matrix_shape, eps):
+    """
+    Determine rank from singular values without running another factorization.
+    """
+    if singular_values.numel() == 0:
+        return 0
+
+    largest = singular_values[0]
+
+    if largest.item() <= 0.0:
+        return 0
+
+    relative_tolerance = max(
+        eps,
+        max(matrix_shape)
+        * torch.finfo(singular_values.dtype).eps,
+    )
+
+    return int(
+        (
+            singular_values
+            > relative_tolerance * largest
+        ).sum().item()
+    )
+
 
 @torch.no_grad()
 def pabs_layerwise(
@@ -389,75 +514,173 @@ def pabs_layerwise(
     device,
     eps=1e-12,
 ):
+    """
+    Compute canonical principal-angle-between-subspaces (PABS).
+
+    For layer l:
+
+        M_l = [mu_1 - mu_G, ..., mu_C - mu_G]
+
+    The two subspaces are:
+
+        span(M_l)
+        dominant output subspace of W_l
+
+    Both subspaces live in the current layer's output space.
+
+    Their principal-angle cosines are the singular values of:
+
+        Q_M.T @ Q_W
+    """
     model.eval().to(device)
 
     if means_by_layer is None:
-        raise RuntimeError("Expected means_by_layer in pabs_layerwise but got None.")
+        raise RuntimeError(
+            "Expected means_by_layer in pabs_layerwise but got None."
+        )
 
     out = {}
 
-    for k in layer_keys:
-        if k not in means_by_layer:
-            raise KeyError(f"means_by_layer missing key '{k}'.")
+    for feature_key in layer_keys:
+        if feature_key not in means_by_layer:
+            raise KeyError(
+                f"means_by_layer missing key '{feature_key}'."
+            )
 
-        if k == "classifier":
-            print("[PABS] Skipping classifier: use M(lin2) against W(classifier), not M(classifier).")
-            continue
+        # Muk: (C, output_dimension)
+        Muk = torch.stack(
+            [
+                mean.to(
+                    device=device,
+                    dtype=torch.float64,
+                )
+                for mean in means_by_layer[feature_key]
+            ],
+            dim=0,
+        )
 
-        Muk = torch.stack([m.to(device) for m in means_by_layer[k]], dim=0)
+        if Muk.ndim != 2:
+            raise RuntimeError(
+                f"Layer {feature_key}: expected class means with shape "
+                f"(C, D), got {tuple(Muk.shape)}."
+            )
 
         if Muk.shape[0] != num_classes:
             raise RuntimeError(
-                f"Layer {k}: expected {num_classes} class means, got {Muk.shape[0]}"
+                f"Layer {feature_key}: expected {num_classes} class "
+                f"means, got {Muk.shape[0]}."
             )
 
         feature_dim = Muk.shape[1]
 
-        module, weight_key, W = find_successor_pabs_weight_module(
+        module, weight_key, W = find_current_pabs_weight_module(
             model=model,
-            feature_key=k,
+            feature_key=feature_key,
             feature_dim=feature_dim,
             device=device,
         )
 
         if module is None or W is None:
-            print(f"[PABS] Skipping {k}: no successor Conv2d/Linear with input dim {feature_dim}.")
+            print(
+                f"[PABS] Skipping {feature_key}: could not resolve a "
+                f"current Conv2d/Linear with output dimension "
+                f"{feature_dim}."
+            )
             continue
 
-        # M_l: (p_l, C)
-        M = Muk - Muk.mean(dim=0, keepdim=True)  # (C, p_l)
-        M = M.T                                  # (p_l, C)
+        # Centered class-mean matrix:
+        #
+        #   Muk centered: (C, output_dimension)
+        #   M:            (output_dimension, C)
+        M = Muk - Muk.mean(dim=0, keepdim=True)
+        M = M.T.contiguous()
 
-        Qm = torch.linalg.qr(M, mode="reduced").Q
-
-        # W_l+1: (p_{l+1}, p_l)
-        _, _, Vh = torch.linalg.svd(W, full_matrices=False)
-
-        r = min(num_classes, Qm.shape[1], Vh.shape[0])
-
-        if r == 0:
-            print(f"[PABS] Skipping {k}: rank 0.")
+        if M.shape[0] != W.shape[0]:
+            print(
+                f"[PABS] Skipping {feature_key}: ambient-space mismatch. "
+                f"M has {M.shape[0]} rows, while W({weight_key}) has "
+                f"{W.shape[0]} output dimensions."
+            )
             continue
 
-        # Top-r input subspace of successor W
-        Qw = Vh[:r].T  # (p_l, r)
+        # The columns of Um span the centered class-mean subspace.
+        Um, Sm, _ = torch.linalg.svd(
+            M,
+            full_matrices=False,
+        )
 
+        # The columns of Uw are the output-space singular directions of W.
+        Uw, Sw, _ = torch.linalg.svd(
+            W,
+            full_matrices=False,
+        )
+
+        rank_m = svd_numerical_rank(
+            singular_values=Sm,
+            matrix_shape=M.shape,
+            eps=eps,
+        )
+
+        rank_w = svd_numerical_rank(
+            singular_values=Sw,
+            matrix_shape=W.shape,
+            eps=eps,
+        )
+
+        # Centered C-class means have theoretical rank at most C - 1.
+        rank_m = min(
+            rank_m,
+            num_classes - 1,
+        )
+
+        r = min(
+            num_classes - 1,
+            rank_m,
+            rank_w,
+            Um.shape[1],
+            Uw.shape[1],
+        )
+
+        if r <= 0:
+            print(
+                f"[PABS] Skipping {feature_key}: empty subspace "
+                f"(rank(M)={rank_m}, rank(W)={rank_w})."
+            )
+            continue
+
+        # Orthonormal bases obtained entirely from SVD.
+        Qm = Um[:, :r]
+        Qw = Uw[:, :r]
+
+        # Singular values are the cosines of the principal angles.
         cosines = torch.linalg.svdvals(Qm.T @ Qw)
-        cosines = cosines[:r].clamp(0.0, 1.0)
+        cosines = cosines.clamp(0.0, 1.0)
 
-        out[k] = {
+        angles = torch.arccos(cosines)
+
+        out[feature_key] = {
             "pabs_mean_cosine": cosines.mean().item(),
             "pabs_min_cosine": cosines.min().item(),
             "pabs_max_cosine": cosines.max().item(),
-            "pabs_mean_angle_rad": torch.arccos(cosines).mean().item(),
-            "pabs_max_angle_rad": torch.arccos(cosines).max().item(),
+            "pabs_mean_angle_rad": angles.mean().item(),
+            "pabs_max_angle_rad": angles.max().item(),
+
+            # Diagnostic metadata.
             "weight_key": weight_key,
             "weight_shape_0": W.shape[0],
             "weight_shape_1": W.shape[1],
+            "subspace_dimension": r,
+            "mean_rank": rank_m,
+            "weight_rank": rank_w,
         }
 
-    return out
+        print(
+            f"[PABS] {feature_key} vs {weight_key}: "
+            f"M={tuple(M.shape)}, W={tuple(W.shape)}, "
+            f"rank(M)={rank_m}, rank(W)={rank_w}, r={r}"
+        )
 
+    return out
 @torch.no_grad()
 def nc4Fun(
     model: nn.Module,
