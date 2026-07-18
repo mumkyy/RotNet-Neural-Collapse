@@ -17,6 +17,36 @@ import torch.nn.functional as F
 from . import Algorithm
 from pdb import set_trace as breakpoint
 
+def resolve_pabs_weight_module(feature_module):
+    # Linear layers map directly to themselves.
+    if isinstance(feature_module, (nn.Conv2d, nn.Linear)):
+        return feature_module
+
+    # For residual blocks, select the final main-path Conv2d.
+    candidates = []
+
+    for name, module in feature_module.named_modules():
+        if not isinstance(module, (nn.Conv2d, nn.Linear)):
+            continue
+
+        normalized_name = name.lower()
+
+        if (
+            "shortcut" in normalized_name
+            or "downsample" in normalized_name
+        ):
+            continue
+
+        candidates.append(module)
+
+    if not candidates:
+        raise ValueError(
+            f"No main-path Conv2d/Linear found inside "
+            f"{type(feature_module).__name__}."
+        )
+
+    return candidates[-1]
+
 
 def accuracy(output, target, topk=(1,)):
     """Computes the precision@k for the specified values of k"""
@@ -29,7 +59,7 @@ def accuracy(output, target, topk=(1,)):
 
     res = []
     for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0)
+        correct_k = correct[:k].reshape(-1).float().sum(0)
         res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
@@ -95,6 +125,33 @@ class ClassificationModel(Algorithm):
 
             self.runningSum = None
 
+        if "nc3_layerwise_pen" in opt:
+            self.layerwiseNc3Feats = {}
+            self.layerwiseNc3Modules = {}
+
+            model = self.networks["model"]
+
+            for layer in opt["nc3_layerwise_pen"]["layers"]:
+                # Exposed feature key:
+                # conv2, conv3, conv4, conv5, lin1, lin2, classifier
+                feature_module = model.get_feature_module(layer)
+
+                # Actual weight used for the subspace comparison.
+                weight_module = resolve_pabs_weight_module(
+                    feature_module
+                )
+
+                self.layerwiseNc3Modules[layer] = weight_module
+
+                # Continue hooking the exposed feature module as before.
+                feature_module.register_forward_hook(
+                    lambda module, inputs, output, name=layer:
+                        self.layerwiseNc3Feats.__setitem__(
+                            name,
+                            output,
+                        )
+                )
+        
     def allocate_tensors(self):
         self.tensors = {}
         self.tensors['dataX'] = torch.FloatTensor()
@@ -104,7 +161,9 @@ class ClassificationModel(Algorithm):
         return self.process_batch(batch, do_train=True)
 
     def evaluation_step(self, batch):
-        return self.process_batch(batch, do_train=False)
+        with torch.no_grad():
+            return self.process_batch(batch, do_train=False)
+        
 
     def process_batch(self, batch, do_train=True):
         #*************** LOAD BATCH (AND MOVE IT TO GPU) ********
@@ -146,13 +205,148 @@ class ClassificationModel(Algorithm):
             loss_total = crit(pred_for_loss, y_oh)
         else:
             loss_total = crit(pred_var, labels_var)
-        loss_cls = loss_total
+        loss_cls = loss_total.detach().item()
         nc1_penalty_total = 0.0
         nc1_value_total = 0.0
         nc1_sw_total = 0.0
         nc1_sb_total = 0.0
         nc1_layers = 0
+        """
+            Write it all again this is pabs implementation it is not really perfect but write it again with 
 
+            nc3_l = - tr ( < W / |W| , M / |M| > ) 
+        
+        """
+        if do_train and ('nc3_layerwise_pen' in self.opt): 
+            eps = 1e-6
+
+            for layer in self.opt['nc3_layerwise_pen']['layers']: 
+
+                f = self.layerwiseNc3Feats.get(layer, None)
+
+                # extract batch and dim 
+                if f is None:
+                    continue
+                if f.dim() == 4:
+                    f = f.mean(dim=(2,3))
+                B, D = f.shape
+
+                counts = torch.bincount(
+                    labels_var,
+                    minlength=C,
+                ).to(
+                    device=f.device,
+                    dtype=f.dtype,
+                )
+
+                sums = f.new_zeros(C, D)
+                sums.index_add_(0, labels_var, f)
+
+                present = counts > 0
+                num_present = int(present.sum().item())
+
+                if num_present < 2:
+                    continue
+
+                mu_C = (
+                    sums[present]
+                    / counts[present].unsqueeze(1)
+                )
+
+                mu_G = mu_C.mean(
+                    dim=0,
+                    keepdim=True,
+                )
+
+                M = (mu_C - mu_G).T.contiguous().detach()
+
+                weight_module = self.layerwiseNc3Modules[layer]
+                W = weight_module.weight
+
+                if isinstance(weight_module, nn.Conv2d):
+                    W = W.flatten(start_dim=1)
+
+                U_W, S_W, _ = torch.linalg.svd(
+                    W,
+                    full_matrices=False,
+                )
+
+                U_M, S_M, _ = torch.linalg.svd(
+                    M,
+                    full_matrices=False,
+                )
+
+                max_dim = min(
+                    num_present - 1,
+                    U_M.shape[1],
+                    U_W.shape[1],
+                )
+
+                if max_dim <= 0:
+                    continue
+
+                m_relative_tolerance = max(
+                    eps,
+                    max(M.shape) * torch.finfo(M.dtype).eps,
+                )
+
+                w_relative_tolerance = max(
+                    eps,
+                    max(W.shape) * torch.finfo(W.dtype).eps,
+                )
+
+                rank_m = (
+                    int(
+                        (
+                            S_M
+                            > m_relative_tolerance * S_M[0]
+                        ).sum().item()
+                    )
+                    if S_M.numel() and S_M[0].item() > 0
+                    else 0
+                )
+
+                rank_w = (
+                    int(
+                        (
+                            S_W
+                            > w_relative_tolerance * S_W[0]
+                        ).sum().item()
+                    )
+                    if S_W.numel() and S_W[0].item() > 0
+                    else 0
+                )
+
+                rank_m = min(
+                    rank_m,
+                    num_present - 1,
+                )
+
+                r = min(
+                    max_dim,
+                    rank_m,
+                    rank_w,
+                )
+
+                if r <= 0:
+                    continue
+
+                Q_M = U_M[:, :r]
+                Q_W = U_W[:, :r]
+
+                alignment = (
+                    (Q_M.T @ Q_W).square().sum()
+                    / float(r)
+                )
+
+                layer_weight = self.opt[
+                    "nc3_layerwise_pen"
+                ]["weights"][layer]
+
+                loss_total = (
+                    loss_total
+                    + layer_weight * alignment
+                )
         if do_train and ('nc3_reg' in self.opt): 
             
             eps = 1e-6 
@@ -209,7 +403,11 @@ class ClassificationModel(Algorithm):
 
             nc3 = diff.norm()
             print(f'NC3 during training: {nc3}')
-            loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3 + eps) * -1) 
+
+            if self.opt['nc3_reg'].get("use_log", True):
+                loss_total += (self.opt['nc3_reg']['lambdaNC3'] * torch.log(nc3 + eps) * -1) 
+            else:
+                loss_total += abs((self.opt['nc3_reg']['lambdaNC3'] * nc3))
 
         # --- NC1 penalty ---
         #no warmup
@@ -263,7 +461,7 @@ class ClassificationModel(Algorithm):
         # precision still computed on raw logits
         record['prec1'] = accuracy(pred_var.detach(), labels_var, topk=(1,))[0].item()
         record['loss']  = loss_total.item()
-        record['loss_cls'] = loss_cls.item()
+        record['loss_cls'] = loss_cls
         if nc1_layers > 0:
             record['nc1'] = nc1_value_total / nc1_layers
             record['nc1_penalty'] = nc1_penalty_total
