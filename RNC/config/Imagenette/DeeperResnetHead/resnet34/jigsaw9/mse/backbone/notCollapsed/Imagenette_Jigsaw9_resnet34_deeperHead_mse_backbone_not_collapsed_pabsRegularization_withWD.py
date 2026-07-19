@@ -64,6 +64,7 @@ config["nc3_layerwise_pen"] = {
         "lin2": pabs_weight,
         "classifier": pabs_weight,
     },
+    "no_svd": True,
 }
 
 criterions = {}
