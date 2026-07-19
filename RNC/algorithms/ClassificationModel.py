@@ -265,79 +265,88 @@ class ClassificationModel(Algorithm):
 
                 if isinstance(weight_module, nn.Conv2d):
                     W = W.flatten(start_dim=1)
+                if self.opt['nc3_layerwise_pen'].get('no_svd', False):
+                    G_W = W @ W.T
+                    G_M = M @ M.T
 
-                U_W, S_W, _ = torch.linalg.svd(
-                    W,
-                    full_matrices=False,
-                )
+                    G_W = G_W / G_W.norm(p="fro").clamp_min(eps)
+                    G_M = G_M / G_M.norm(p="fro").clamp_min(eps)
 
-                U_M, S_M, _ = torch.linalg.svd(
-                    M,
-                    full_matrices=False,
-                )
-
-                max_dim = min(
-                    num_present - 1,
-                    U_M.shape[1],
-                    U_W.shape[1],
-                )
-
-                if max_dim <= 0:
-                    continue
-
-                m_relative_tolerance = max(
-                    eps,
-                    max(M.shape) * torch.finfo(M.dtype).eps,
-                )
-
-                w_relative_tolerance = max(
-                    eps,
-                    max(W.shape) * torch.finfo(W.dtype).eps,
-                )
-
-                rank_m = (
-                    int(
-                        (
-                            S_M
-                            > m_relative_tolerance * S_M[0]
-                        ).sum().item()
+                    alignment = (G_W * G_M).sum()
+                    # Equivalent to torch.trace(G_W @ G_M)
+                else:
+                    U_W, S_W, _ = torch.linalg.svd(
+                        W,
+                        full_matrices=False,
                     )
-                    if S_M.numel() and S_M[0].item() > 0
-                    else 0
-                )
 
-                rank_w = (
-                    int(
-                        (
-                            S_W
-                            > w_relative_tolerance * S_W[0]
-                        ).sum().item()
+                    U_M, S_M, _ = torch.linalg.svd(
+                        M,
+                        full_matrices=False,
                     )
-                    if S_W.numel() and S_W[0].item() > 0
-                    else 0
-                )
 
-                rank_m = min(
-                    rank_m,
-                    num_present - 1,
-                )
+                    max_dim = min(
+                        num_present - 1,
+                        U_M.shape[1],
+                        U_W.shape[1],
+                    )
 
-                r = min(
-                    max_dim,
-                    rank_m,
-                    rank_w,
-                )
+                    if max_dim <= 0:
+                        continue
 
-                if r <= 0:
-                    continue
+                    m_relative_tolerance = max(
+                        eps,
+                        max(M.shape) * torch.finfo(M.dtype).eps,
+                    )
 
-                Q_M = U_M[:, :r]
-                Q_W = U_W[:, :r]
+                    w_relative_tolerance = max(
+                        eps,
+                        max(W.shape) * torch.finfo(W.dtype).eps,
+                    )
 
-                alignment = (
-                    (Q_M.T @ Q_W).square().sum()
-                    / float(r)
-                )
+                    rank_m = (
+                        int(
+                            (
+                                S_M
+                                > m_relative_tolerance * S_M[0]
+                            ).sum().item()
+                        )
+                        if S_M.numel() and S_M[0].item() > 0
+                        else 0
+                    )
+
+                    rank_w = (
+                        int(
+                            (
+                                S_W
+                                > w_relative_tolerance * S_W[0]
+                            ).sum().item()
+                        )
+                        if S_W.numel() and S_W[0].item() > 0
+                        else 0
+                    )
+
+                    rank_m = min(
+                        rank_m,
+                        num_present - 1,
+                    )
+
+                    r = min(
+                        max_dim,
+                        rank_m,
+                        rank_w,
+                    )
+
+                    if r <= 0:
+                        continue
+
+                    Q_M = U_M[:, :r]
+                    Q_W = U_W[:, :r]
+
+                    alignment = (
+                        (Q_M.T @ Q_W).square().sum()
+                        / float(r)
+                    )
 
                 layer_weight = self.opt[
                     "nc3_layerwise_pen"
