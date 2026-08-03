@@ -37,9 +37,9 @@ config['networks'] = networks
 # Weight decay is on.
 # Exposed NIN feature keys: conv1, conv2, conv3, conv4, penult, classifier.
 pabs_layers = [
-    "conv2",
-    "conv3",
-    "conv4",
+    "conv2.Block2_ConvB3",
+    "conv3.Block3_ConvB3",
+    "conv4.Block4_ConvB3",
     "classifier",
 ]
 
@@ -49,9 +49,9 @@ config["nc3_layerwise_pen"] = {
     "layers": pabs_layers,
 
     "weights": {
-        "conv2": pabs_weight,
-        "conv3": pabs_weight,
-        "conv4": pabs_weight,
+        "conv2.Block2_ConvB3": pabs_weight,
+        "conv3.Block3_ConvB3": pabs_weight,
+        "conv4.Block4_ConvB3": pabs_weight,
         "classifier": pabs_weight,
     },
     "no_svd": True,
