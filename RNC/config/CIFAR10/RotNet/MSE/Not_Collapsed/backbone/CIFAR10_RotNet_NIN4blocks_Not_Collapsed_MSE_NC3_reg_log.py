@@ -1,7 +1,6 @@
-batch_size = 128
+batch_size   = 128
 
 config = {}
-
 data_train_opt = {}
 data_train_opt['batch_size'] = batch_size
 data_train_opt['unsupervised'] = True
@@ -28,35 +27,19 @@ net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
 networks = {}
-net_optim_params = {
-    'optim_type': 'sgd', 'lr': 0.1, 'momentum': 0.9, 'weight_decay': 0,
-    'nesterov': True,
-    'LUT_lr': [(60, 0.1), (120, 0.02), (160, 0.004), (200, 0.0008)],
-}
-networks['model'] = {
-    'def_file': 'architectures/NetworkInNetwork.py',
-    'pretrained': None,
-    'opt': net_opt,
-    'optim_params': net_optim_params,
-}
+net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 0, 'nesterov': True, 'LUT_lr':[(60, 0.1),(120, 0.02),(160, 0.004),(200, 0.0008)]}
+networks['model'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params}
 config['networks'] = networks
 
-# NC1 on the penultimate layer — positive weight pushes *away* from collapse
-# (penalty = -log(Sw/Sb), so small Sw/Sb incurs a large penalty)
-config['nc_reg'] = {
-    'layers':  ['conv4.Block4_ConvB3'],
-    'weights': {'conv4.Block4_ConvB3': 0.001},
-}
-
-# NC3 on the same penultimate layer — negative lambdaNC3 *forces* NC3 alignment
-# (formula: loss += lambdaNC3 * -log(nc3_diff), so negative lambda rewards small nc3_diff)
+# NC3 Final (nc3_reg): reg log
 config['nc3_reg'] = {
-    'last_layer': 'conv4.Block4_ConvB3',
+    'last_layer': 'penult',
     'classifier': 'classifier',
-    'lambdaNC3': -0.1,
+    'lambdaNC3': 0.1,
+    'use_log': True,
 }
 
 criterions = {}
-criterions['loss'] = {'ctype': 'MSELoss', 'opt': None}
+criterions['loss'] = {'ctype':'MSELoss', 'opt':None}
 config['criterions'] = criterions
 config['algorithm_type'] = 'ClassificationModel'

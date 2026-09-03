@@ -1,7 +1,6 @@
 batch_size   = 128
 
 config = {}
-# set the parameters related to the training and testing set
 data_train_opt = {}
 data_train_opt['batch_size'] = batch_size
 data_train_opt['unsupervised'] = True
@@ -32,29 +31,16 @@ net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_deca
 networks['model'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params}
 config['networks'] = networks
 
-# Force collapse via inverse NC3 (self-duality) penalty, applied layerwise.
-# Negative weights pull each layer's weight subspace toward the detached
-# class-mean subspace (collapse). No WD.
-pabs_layers = ['conv2.Block2_ConvB3', 'conv3.Block3_ConvB3', 'conv4.Block4_ConvB3', 'classifier']
-pabs_weight = -1e-3
+# NC3 Layerwise (nc3_layerwise_pen): inv
 config['nc3_layerwise_pen'] = {
-    'layers': pabs_layers,
+    'layers': ['conv2.Block2_ConvB3', 'conv3.Block3_ConvB3', 'conv4.Block4_ConvB3', 'classifier'],
     'weights': {
-        'conv2.Block2_ConvB3': pabs_weight,
-        'conv3.Block3_ConvB3': pabs_weight,
-        'conv4.Block4_ConvB3': pabs_weight,
-        'classifier': pabs_weight,
+        'conv2.Block2_ConvB3': -1e-3,
+        'conv3.Block3_ConvB3': -1e-3,
+        'conv4.Block4_ConvB3': -1e-3,
+        'classifier': -1e-3,
     },
     'no_svd': True,
-}
-
-# Final-layer NC3 penalty (penultimate features vs classifier rows).
-# Negative lambdaNC3 forces the classifier into self-duality (collapse).
-config['nc3_reg'] = {
-    'last_layer': 'penult',
-    'classifier': 'classifier',
-    'lambdaNC3': -0.1,
-    'use_log': True,
 }
 
 criterions = {}

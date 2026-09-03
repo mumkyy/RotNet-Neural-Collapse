@@ -8,7 +8,7 @@ data_train_opt['epoch_size'] = None
 data_train_opt['random_sized_crop'] = False
 data_train_opt['dataset_name'] = 'stl10'
 data_train_opt['split'] = 'unlabeled'
-data_train_opt['pretext_mode'] = 'jigsaw_9'
+data_train_opt['pretext_mode'] = 'jigsaw'
 data_train_opt['patch_jitter'] = 2
 data_train_opt['color_distort'] = True
 data_train_opt['color_dist_strength'] = 0.5
@@ -20,7 +20,7 @@ data_test_opt['epoch_size'] = None
 data_test_opt['random_sized_crop'] = False
 data_test_opt['dataset_name'] = 'stl10'
 data_test_opt['split'] = 'test'
-data_test_opt['pretext_mode'] = 'jigsaw_9'
+data_test_opt['pretext_mode'] = 'jigsaw'
 data_test_opt['patch_jitter'] = 0
 data_test_opt['color_distort'] = False
 data_test_opt['color_dist_strength'] = 0.0
@@ -30,7 +30,7 @@ config['data_test_opt']  = data_test_opt
 config['max_num_epochs'] = 200
 
 net_opt = {}
-net_opt['num_classes'] = 10
+net_opt['num_classes'] = 4
 net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
@@ -39,32 +39,14 @@ net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_dec
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt, 'optim_params': net_optim_params}
 config['networks'] = networks
 
-# Force collapse via inverse NC3 (self-duality) penalty, applied layerwise.
-# Negative weights pull each layer's weight subspace toward the detached
-# class-mean subspace (collapse). No WD.
-pabs_layers = ['conv2', 'conv3', 'conv4', 'conv5', 'lin1', 'lin2', 'classifier']
-pabs_weight = -1e-3
-config['nc3_layerwise_pen'] = {
-    'layers': pabs_layers,
+# NC1 (nc_reg): reg nonlog Final
+config['nc_reg'] = {
+    'layers': ['lin2'],
     'weights': {
-        'conv2': pabs_weight,
-        'conv3': pabs_weight,
-        'conv4': pabs_weight,
-        'conv5': pabs_weight,
-        'lin1': pabs_weight,
-        'lin2': pabs_weight,
-        'classifier': pabs_weight,
+        'lin2': 0.001,
     },
-    'no_svd': True,
-}
-
-# Final-layer NC3 penalty (lin2 features vs classifier rows).
-# Negative lambdaNC3 forces the classifier into self-duality (collapse).
-config['nc3_reg'] = {
-    'last_layer': 'lin2',
-    'classifier': 'classifier',
-    'lambdaNC3': -0.1,
-    'use_log': True,
+    'detach_sb': True,
+    'inverse': True,
 }
 
 criterions = {}

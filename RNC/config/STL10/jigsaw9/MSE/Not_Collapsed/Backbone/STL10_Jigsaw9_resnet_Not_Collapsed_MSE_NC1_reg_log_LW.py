@@ -39,34 +39,20 @@ net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_dec
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt, 'optim_params': net_optim_params}
 config['networks'] = networks
 
-# NC1 (nc_reg): inv nonlog LW
+# NC1 (nc_reg): reg log LW
 config['nc_reg'] = {
     'layers': ['conv2', 'conv3', 'conv4', 'conv5', 'lin1', 'lin2', 'classifier'],
     'weights': {
-        'conv2': -0.005,
-        'conv3': -0.005,
-        'conv4': -0.01,
-        'conv5': -0.01,
-        'lin1': -0.001,
-        'lin2': -0.001,
-        'classifier': -0.0005,
+        'conv2': 0.005,
+        'conv3': 0.005,
+        'conv4': 0.01,
+        'conv5': 0.01,
+        'lin1': 0.001,
+        'lin2': 0.001,
+        'classifier': 0.0005,
     },
     'detach_sb': True,
-    'inverse': True,
-}
-# NC3 Layerwise (nc3_layerwise_pen): inv
-config['nc3_layerwise_pen'] = {
-    'layers': ['conv2', 'conv3', 'conv4', 'conv5', 'lin1', 'lin2', 'classifier'],
-    'weights': {
-        'conv2': -1e-3,
-        'conv3': -1e-3,
-        'conv4': -1e-3,
-        'conv5': -1e-3,
-        'lin1': -1e-3,
-        'lin2': -1e-3,
-        'classifier': -1e-3,
-    },
-    'no_svd': True,
+    'inverse': False,
 }
 
 criterions = {}

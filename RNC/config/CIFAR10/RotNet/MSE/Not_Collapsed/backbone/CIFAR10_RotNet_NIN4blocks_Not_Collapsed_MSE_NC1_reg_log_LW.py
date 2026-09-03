@@ -28,14 +28,22 @@ net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
 networks = {}
-net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 5e-4, 'nesterov': True, 'LUT_lr':[(60, 0.1),(120, 0.02),(160, 0.004),(200, 0.0008)]}
+net_optim_params = {'optim_type': 'sgd', 'lr': 0.1, 'momentum':0.9, 'weight_decay': 0, 'nesterov': True, 'LUT_lr':[(60, 0.1),(120, 0.02),(160, 0.004),(200, 0.0008)]}
 networks['model'] = {'def_file': 'architectures/NetworkInNetwork.py', 'pretrained': None, 'opt': net_opt,  'optim_params': net_optim_params} 
 config['networks'] = networks
 
+# NC1 (nc_reg): reg log LW
 config['nc_reg'] = {
-    'layers': ['conv1.Block1_ConvB1','conv1.Block1_ConvB2','conv1.Block1_ConvB3','conv1.Block1_MaxPool','conv2.Block2_ConvB1','conv2.Block2_ConvB2','conv2.Block2_ConvB3','conv2.Block2_AvgPool','conv3.Block3_ConvB1','conv3.Block3_ConvB2','conv3.Block3_ConvB3','conv4.Block4_ConvB1','conv4.Block4_ConvB2','conv4.Block4_ConvB3','classifier'],  # which layers to regularize
-    'weights': {'conv1.Block1_ConvB1': 0.0001,'conv1.Block1_ConvB2': 0.0001,'conv1.Block1_ConvB3': 0.0001,'conv1.Block1_MaxPool': 0.0001,'conv2.Block2_ConvB1': 0.0001,'conv2.Block2_ConvB2': 0.0001,'conv2.Block2_ConvB3': 0.0001,'conv2.Block2_AvgPool': 0.0001,'conv3.Block3_ConvB1': 0.0001,'conv3.Block3_ConvB2': 0.0001,'conv3.Block3_ConvB3': 0.0001,'conv4.Block4_ConvB1': 0.0001,'conv4.Block4_ConvB2': 0.0001,'conv4.Block4_ConvB3': 0.0001,'classifier': 0.0001},
-    'detach_sb': False,
+    'layers': ['conv2', 'conv3', 'conv4', 'penult', 'classifier'],
+    'weights': {
+        'conv2': 0.005,
+        'conv3': 0.005,
+        'conv4': 0.01,
+        'penult': 0.001,
+        'classifier': 0.0005,
+    },
+    'detach_sb': True,
+    'inverse': False,
 }
 
 criterions = {}
