@@ -46,12 +46,19 @@ config['nc_reg'] = {
     'detach_sb': True,
     'inverse': False,
 }
-# NC3 (nc3_reg): inv log
-config['nc3_reg'] = {
-    'last_layer': 'lin2',
-    'classifier': 'classifier',
-    'lambdaNC3': -0.1,
-    'use_log': True,
+# NC3 Layerwise (nc3_layerwise_pen): inv
+config['nc3_layerwise_pen'] = {
+    'layers': ['conv2', 'conv3', 'conv4', 'conv5', 'lin1', 'lin2', 'classifier'],
+    'weights': {
+        'conv2': -1e-3,
+        'conv3': -1e-3,
+        'conv4': -1e-3,
+        'conv5': -1e-3,
+        'lin1': -1e-3,
+        'lin2': -1e-3,
+        'classifier': -1e-3,
+    },
+    'no_svd': True,
 }
 
 criterions = {}

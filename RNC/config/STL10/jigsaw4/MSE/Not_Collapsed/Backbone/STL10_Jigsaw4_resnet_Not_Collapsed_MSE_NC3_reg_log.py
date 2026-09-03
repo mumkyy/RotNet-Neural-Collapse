@@ -35,38 +35,16 @@ net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
 networks = {}
-net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_decay': 5e-3, 'nesterov': True, 'LUT_lr':[(60, 0.01), (120, 0.002), (160, 0.0004), (200, 0.00008)]}
+net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_decay': 0, 'nesterov': True, 'LUT_lr':[(60, 0.01), (120, 0.002), (160, 0.0004), (200, 0.00008)]}
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt, 'optim_params': net_optim_params}
 config['networks'] = networks
 
-# Layerwise NC-3 penalty (not collapsed: positive weights push the weight
-# subspace away from the detached class-mean subspace, resisting NC3 collapse).
-# Weight decay is on.
-pabs_layers = [
-    "conv2",
-    "conv3",
-    "conv4",
-    "conv5",
-    "lin1",
-    "lin2",
-    "classifier",
-]
-
-pabs_weight = 1e-3
-
-config["nc3_layerwise_pen"] = {
-    "layers": pabs_layers,
-
-    "weights": {
-        "conv2": pabs_weight,
-        "conv3": pabs_weight,
-        "conv4": pabs_weight,
-        "conv5": pabs_weight,
-        "lin1": pabs_weight,
-        "lin2": pabs_weight,
-        "classifier": pabs_weight,
-    },
-    "no_svd": True,
+# NC3 Final (nc3_reg): reg log
+config['nc3_reg'] = {
+    'last_layer': 'lin2',
+    'classifier': 'classifier',
+    'lambdaNC3': 0.1,
+    'use_log': True,
 }
 
 criterions = {}

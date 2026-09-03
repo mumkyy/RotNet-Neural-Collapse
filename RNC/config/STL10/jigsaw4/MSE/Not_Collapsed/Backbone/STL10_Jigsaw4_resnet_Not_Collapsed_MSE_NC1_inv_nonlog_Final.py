@@ -39,12 +39,14 @@ net_optim_params = {'optim_type': 'sgd', 'lr': 0.01, 'momentum':0.9, 'weight_dec
 networks['model'] = {'def_file': 'architectures/Resnet.py', 'pretrained': None, 'opt': net_opt, 'optim_params': net_optim_params}
 config['networks'] = networks
 
-# NC3 penalty: -lambdaNC3 * log(NC3 + eps); pushes away from collapse.
-# last_layer/classifier must be valid ResNet34_NIN_Style get_feature_module keys.
-config['nc3_reg'] = {
-    'last_layer': 'lin2',
-    'classifier': 'classifier',
-    'lambdaNC3': 0.01,
+# NC1 (nc_reg): inv nonlog Final
+config['nc_reg'] = {
+    'layers': ['lin2'],
+    'weights': {
+        'lin2': -0.001,
+    },
+    'detach_sb': True,
+    'inverse': True,
 }
 
 criterions = {}

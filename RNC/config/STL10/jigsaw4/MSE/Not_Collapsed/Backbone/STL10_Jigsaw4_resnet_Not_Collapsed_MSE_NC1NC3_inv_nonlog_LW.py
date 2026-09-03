@@ -8,7 +8,7 @@ data_train_opt['epoch_size'] = None
 data_train_opt['random_sized_crop'] = False
 data_train_opt['dataset_name'] = 'stl10'
 data_train_opt['split'] = 'unlabeled'
-data_train_opt['pretext_mode'] = 'jigsaw_9'
+data_train_opt['pretext_mode'] = 'jigsaw'
 data_train_opt['patch_jitter'] = 2
 data_train_opt['color_distort'] = True
 data_train_opt['color_dist_strength'] = 0.5
@@ -20,7 +20,7 @@ data_test_opt['epoch_size'] = None
 data_test_opt['random_sized_crop'] = False
 data_test_opt['dataset_name'] = 'stl10'
 data_test_opt['split'] = 'test'
-data_test_opt['pretext_mode'] = 'jigsaw_9'
+data_test_opt['pretext_mode'] = 'jigsaw'
 data_test_opt['patch_jitter'] = 0
 data_test_opt['color_distort'] = False
 data_test_opt['color_dist_strength'] = 0.0
@@ -30,7 +30,7 @@ config['data_test_opt']  = data_test_opt
 config['max_num_epochs'] = 200
 
 net_opt = {}
-net_opt['num_classes'] = 10
+net_opt['num_classes'] = 4
 net_opt['num_stages']  = 4
 net_opt['use_avg_on_conv3'] = False
 
