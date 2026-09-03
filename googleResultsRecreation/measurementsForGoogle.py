@@ -20,15 +20,15 @@ import train_and_eval as te
 # config
 # ============================================================
 
-WORKDIR = "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_deeperNetwork/checkpoint_last.pt"
+WORKDIR = "/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_deeperNetwork/checkpoint_last.pt"
  
 
 
 # ran this and got good results
-# "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/IntermediateKeysExposedJigsawRes50"
-# "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch"
-# "/project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_100Epoch"
-# /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_NO_WD
+# "/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/IntermediateKeysExposedJigsawRes50"
+# "/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch"
+# "/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_100Epoch"
+# /RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_NO_WD
 
 USE_SPLIT = "val"
 ONLY_LAST = False
