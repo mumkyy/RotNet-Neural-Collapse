@@ -25,9 +25,9 @@ def _resolve_dataset_root(dataset_name, dataset_dir):
     Resolve the dataset root directory.
 
     For your cluster layout, valid roots for imagenette include:
-      /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160
-      /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette
-      /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets
+      /RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160
+      /RotNet-Neural-Collapse/RNC/datasets/Imagenette
+      /RotNet-Neural-Collapse/RNC/datasets
 
     and we normalize them to the directory that directly contains train/ and val/.
     """

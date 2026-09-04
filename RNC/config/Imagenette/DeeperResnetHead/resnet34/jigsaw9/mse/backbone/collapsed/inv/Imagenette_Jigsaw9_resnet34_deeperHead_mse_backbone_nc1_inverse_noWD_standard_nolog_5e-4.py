@@ -42,7 +42,7 @@ config['networks'] = networks
 
 config['nc_reg'] = {
     'layers': ['conv2','conv3','conv4','conv5','lin1','lin2','classifier'],
-    'weights': {'conv2':-0.0005,'conv3':-0.0005,'conv4':-0.0005,'conv5':-0.0005,'lin1':-0.0005,'lin2':-0.0005,'classifier':-0.0005},
+    'weights': {'conv2':-0.001,'conv3':-0.001,'conv4':-0.001,'conv5':-0.001,'lin1':-0.0005,'lin2':-0.0005,'classifier':-0.0005},
     'detach_sb': True,
     'inverse': True
 }

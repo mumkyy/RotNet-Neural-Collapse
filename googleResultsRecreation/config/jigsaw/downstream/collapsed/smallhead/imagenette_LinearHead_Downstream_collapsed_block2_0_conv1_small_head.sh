@@ -1,12 +1,12 @@
 #!/bin/sh
 
 python train_and_eval.py \
-  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/DOWNSTREAM_COLLAPSED/LinearHead_Jig9_10Perms_40Epoch/block_0_conv1_small \
+  --workdir /RotNet-Neural-Collapse/googleResultsRecreation/workdirs/DOWNSTREAM_COLLAPSED/LinearHead_Jig9_10Perms_40Epoch/block_0_conv1_small \
   --task downstream \
   --architecture resnet50 \
   --dataset imagenette \
-  --dataset_dir /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160 \
-  --permutations_path /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/permutations_100_max.bin \
+  --dataset_dir /RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160 \
+  --permutations_path /RotNet-Neural-Collapse/googleResultsRecreation/permutations_100_max.bin \
   --train_split train \
   --val_split val \
   --batch_size 32 \
@@ -20,7 +20,7 @@ python train_and_eval.py \
   --epochs 100 \
   --warmup_epochs 5 \
   --serving_input_shape None,64,64,3 \
-  --load_model /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch/checkpoint_last.pt \
+  --load_model /RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch/checkpoint_last.pt \
   --layer_extractor block2.0.conv1 \
   --small_down_head true \
   "$@"

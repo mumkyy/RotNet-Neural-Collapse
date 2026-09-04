@@ -1,11 +1,11 @@
 #!/bin/sh
 
 python train_and_eval.py \
-  --workdir /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_NO_WD \
+  --workdir /RotNet-Neural-Collapse/googleResultsRecreation/workdirs/LinearHead_Jig9_10Perms_40Epoch_NO_WD \
   --task jigsaw \
   --dataset imagenette \
-  --dataset_dir /project/amr239/gma35/RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160 \
-  --permutations_path /project/amr239/gma35/RotNet-Neural-Collapse/googleResultsRecreation/permutations_100_max.bin \
+  --dataset_dir /RotNet-Neural-Collapse/RNC/datasets/Imagenette/imagenette2-160 \
+  --permutations_path /RotNet-Neural-Collapse/googleResultsRecreation/permutations_100_max.bin \
   --train_split train \
   --val_split val \
   --batch_size 32 \
