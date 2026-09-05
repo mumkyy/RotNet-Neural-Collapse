@@ -127,16 +127,35 @@ def main():
     print(model)
     print(all_epochs)
 
-    # capture the weights in a dictonary by layer name 
+    load_state_dict(model, epoch_to_path[max(all_epochs)])
 
-    # create output statistics dictionary               
+    model.cuda() 
+    
+    model_weight_statistics = {}
+    for l in layer_keys: 
+        w = model.l.weight
+        if isinstance(w, torch.nn.conv2d): 
+            w.view(w.shape[0], -1)
+        frob = w.norm(ord="fro") 
 
-        # iterate the dictionary                        
-        # compute the frobenius norm                    
-        # if the layer is conv flatten the weights 
+        model_weight_statistics[l]["froNorm"] = frob
 
-        # compute the stable rank                       
+        l2_sq = w.norm(ord=2) ** 2 
+        frob_sq = frob ** 2 
+        # defined sr(W) = ||W||F^2 / ||W||2^2 - https://arxiv.org/html/2407.21594v1 s
+        model_weight_statistics[l]["stableRank"] =  frob_sq / l2_sq
 
+        '''
+        Stable rank is a continuous measure of matrix size defined by the ratio of the squared Frobenius norm to the squared operator (spectral) norm, whereas spectral rank is the traditional algebraic rank derived directly from the count of non-zero singular values in the matrix spectrum
+        '''
+        eps = 1e-4
+        # include singular value sigma if it is larger than atol i.e. eps 
+        rank = torch.linalg.matrix_rank(w, atol=eps, rtol=0.0)
+
+        model_weight_statistics[l]["effectiveRank"] = rank
+
+
+    print(model_weight_statistics)
 
     return
 
