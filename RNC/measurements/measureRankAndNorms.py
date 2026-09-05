@@ -114,7 +114,7 @@ def main():
     # Load the checkpoint we want to measure (or the last one found)
     epoch_to_path = discover_checkpoints(exp_dir, args.ckpt_glob)
     all_epochs = sorted(epoch_to_path.keys())
-    layers = args.layers
+
 
     # validate layer keys exist
     layer_keys = [x.strip() for x in args.layers.split(",") if x.strip()]
@@ -125,38 +125,41 @@ def main():
             raise RuntimeError(f"Layer key '{k}' not in model.all_feat_names: {model.all_feat_names}")
 
     print(model)
+    print(layer_keys)
     print(all_epochs)
-    print(layers)
     load_state_dict(model, epoch_to_path[max(all_epochs)])
 
-    model.cuda() 
-    
-    model_weight_statistics = {}
-    for l in layers: 
-        print(f"processing layer : {l}")
-        w = model.l.weight
-        if isinstance(w, torch.nn.conv2d): 
-            w.view(w.shape[0], -1)
-        frob = w.norm(ord="fro") 
+    # model.cuda() 
+    # modules = {} 
+    # model_weight_statistics = {}
+    # for l in layer_keys: 
+    #     model
+        
 
-        model_weight_statistics[l]["froNorm"] = frob
+    # for m in modules:
+    #     w = m.weight 
+    #     if isinstance(w, torch.nn.conv2d): 
+    #         w.view(w.shape[0], -1)
+    #     frob = w.norm(ord="fro") 
 
-        l2_sq = w.norm(ord=2) ** 2 
-        frob_sq = frob ** 2 
-        # defined sr(W) = ||W||F^2 / ||W||2^2 - https://arxiv.org/html/2407.21594v1 s
-        model_weight_statistics[l]["stableRank"] =  frob_sq / l2_sq
+    #     model_weight_statistics[l]["froNorm"] = frob
 
-        '''
-        Stable rank is a continuous measure of matrix size defined by the ratio of the squared Frobenius norm to the squared operator (spectral) norm, whereas spectral rank is the traditional algebraic rank derived directly from the count of non-zero singular values in the matrix spectrum
-        '''
-        eps = 1e-4
-        # include singular value sigma if it is larger than atol i.e. eps 
-        rank = torch.linalg.matrix_rank(w, atol=eps, rtol=0.0)
+    #     l2_sq = w.norm(ord=2) ** 2 
+    #     frob_sq = frob ** 2 
+    #     # defined sr(W) = ||W||F^2 / ||W||2^2 - https://arxiv.org/html/2407.21594v1 s
+    #     model_weight_statistics[l]["stableRank"] =  frob_sq / l2_sq
 
-        model_weight_statistics[l]["effectiveRank"] = rank
+    #     '''
+    #     Stable rank is a continuous measure of matrix size defined by the ratio of the squared Frobenius norm to the squared operator (spectral) norm, whereas spectral rank is the traditional algebraic rank derived directly from the count of non-zero singular values in the matrix spectrum
+    #     '''
+    #     eps = 1e-4
+    #     # include singular value sigma if it is larger than atol i.e. eps 
+    #     rank = torch.linalg.matrix_rank(w, atol=eps, rtol=0.0)
+
+    #     model_weight_statistics[l]["effectiveRank"] = rank
 
 
-    print(model_weight_statistics)
+    # print(model_weight_statistics)
 
     return
 
