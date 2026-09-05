@@ -5,7 +5,7 @@ from pathlib import Path
 import importlib
 import argparse 
 
-import numpy 
+
 
 def parse_args(): 
     p = argparse.ArgumentParser("measure and plot the stable rank of the different model layers and fro norm of layer weights")
