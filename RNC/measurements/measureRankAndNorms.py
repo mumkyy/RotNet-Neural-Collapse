@@ -10,7 +10,6 @@ def parse_args():
 
     p.add_argument("--exp", required=True,  help="enter experiment config file path")
     p.add_argument("--exp_dir", required=True, default=None, help="enter the path to the model you want measurements on ")
-    p.add_argument("--layers", required=True, help="enter the layer keys that alias with .weights")
     p.add_argument("--net-key", default="model")
     p.add_argument("--arch-class", default="NetworkInNetwork")
     p.add_argument(
