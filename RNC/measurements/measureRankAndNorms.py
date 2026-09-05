@@ -19,8 +19,7 @@ def parse_args():
         help="Comma list of exposed feature keys for NC1 (e.g. conv1,conv2,conv3,conv4)",
     )
     p.add_argument("--ckpt-glob", default="model_net_epoch*", help='e.g. "model_net_epoch*"')
-    return p
-
+    return p.parse_args()
 
 def build_fresh_model(config , net_key, arch_class):
     net_cfg_all = config.get("networks", {})
