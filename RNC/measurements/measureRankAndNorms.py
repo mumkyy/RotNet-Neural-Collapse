@@ -5,6 +5,8 @@ from pathlib import Path
 import importlib
 import argparse 
 
+import numpy 
+
 def parse_args(): 
     p = argparse.ArgumentParser("measure and plot the stable rank of the different model layers and fro norm of layer weights")
 
@@ -44,7 +46,7 @@ def build_fresh_model(config , net_key, arch_class):
     opt_dict = net_cfg.get("opt", {}).copy()
 
     # Your NIN expects opt dict
-    model = ModelCls(opt_dict).cuda()
+    model = ModelCls(opt_dict).cpu()
 
     
     return model
@@ -66,6 +68,19 @@ def load_state_dict(model,  ckpt_path) :
         sd = state
     model.load_state_dict(sd, strict=True)
 
+def iter_weight_modules_in_order(model, layer_keys):
+    linearLayers = {} 
+    convLayers = {} 
+    for name, module in model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            convLayers[name] =  module
+        elif isinstance(module, nn.Linear): 
+            linearLayers[name] = module
+        else:
+            pass
+
+    return linearLayers , convLayers
+
 
 def discover_checkpoints(exp_dir, ckpt_glob) :
     files = list(exp_dir.glob(ckpt_glob))
@@ -86,6 +101,9 @@ def discover_checkpoints(exp_dir, ckpt_glob) :
     if not out:
         raise RuntimeError("Found checkpoint files but failed to parse epoch numbers.")
     return out
+
+
+
 
 
 
@@ -124,42 +142,54 @@ def main():
         if k not in model.all_feat_names:
             raise RuntimeError(f"Layer key '{k}' not in model.all_feat_names: {model.all_feat_names}")
 
-    print(model)
-    print(layer_keys)
-    print(all_epochs)
+    # print(model)
+    # print(layer_keys)
+    # print(all_epochs)
     load_state_dict(model, epoch_to_path[max(all_epochs)])
+    lm, cm = iter_weight_modules_in_order(model, layer_keys)
 
+    # print(lm)
+    # print(cm)
+
+    # n = len(lm) + len(cm)
     # model.cuda() 
-    # modules = {} 
-    # model_weight_statistics = {}
-    # for l in layer_keys: 
-    #     model
-        
 
-    # for m in modules:
-    #     w = m.weight 
-    #     if isinstance(w, torch.nn.conv2d): 
-    #         w.view(w.shape[0], -1)
-    #     frob = w.norm(ord="fro") 
+    model_weight_statistics = {} 
+    def computeStats(w, l):
+            model_weight_statistics[l] = {} 
+            frob = torch.linalg.matrix_norm(w, ord="fro")
 
-    #     model_weight_statistics[l]["froNorm"] = frob
+            model_weight_statistics[l]["froNorm"] = frob
 
-    #     l2_sq = w.norm(ord=2) ** 2 
-    #     frob_sq = frob ** 2 
-    #     # defined sr(W) = ||W||F^2 / ||W||2^2 - https://arxiv.org/html/2407.21594v1 s
-    #     model_weight_statistics[l]["stableRank"] =  frob_sq / l2_sq
+            l2_sq = torch.linalg.matrix_norm(w, ord=2)
+            l2_sq = l2_sq ** 2
+            frob_sq = frob ** 2 
+            # defined sr(W) = ||W||F^2 / ||W||2^2 - https://arxiv.org/html/2407.21594v1 s
+            model_weight_statistics[l]["stableRank"] =  (frob_sq / l2_sq)
 
-    #     '''
-    #     Stable rank is a continuous measure of matrix size defined by the ratio of the squared Frobenius norm to the squared operator (spectral) norm, whereas spectral rank is the traditional algebraic rank derived directly from the count of non-zero singular values in the matrix spectrum
-    #     '''
-    #     eps = 1e-4
-    #     # include singular value sigma if it is larger than atol i.e. eps 
-    #     rank = torch.linalg.matrix_rank(w, atol=eps, rtol=0.0)
+            '''
+            Stable rank is a continuous measure of matrix size defined by the ratio of the squared Frobenius norm to the squared operator (spectral) norm, whereas spectral rank is the traditional algebraic rank derived directly from the count of non-zero singular values in the matrix spectrum
+            '''
+            eps = 1e-4
+            # include singular value sigma if it is larger than atol i.e. eps 
+            rank = torch.linalg.matrix_rank(w, atol=eps, rtol=0.0)
 
-    #     model_weight_statistics[l]["effectiveRank"] = rank
+            model_weight_statistics[l]["Rank"] = rank
+            model_weight_statistics[l]["weightShape"] = w.shape
+    for c in cm.keys(): 
+        w = cm[c].weight 
+        print("...")
+        # print(f"weight successfuly extracted for layer {c}")
+        w = w.view(w.shape[0], -1) 
+        # print(f"weight successfully reshaped to {w.shape}")
+        computeStats(w, c)  
+    for l in lm.keys() :
+        print("...")
+        w = lm[l].weight 
+        # print(f"weight successfuly extracted for layer {l}")
+        computeStats(w, l)
 
-
-    # print(model_weight_statistics)
+    print(model_weight_statistics)
 
     return
 
