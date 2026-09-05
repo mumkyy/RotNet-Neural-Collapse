@@ -1,7 +1,7 @@
 import torch 
 import torch.nn as nn
 import matplotlib.pyplot as plt
-import Path
+from pathlib import Path
 import importlib
 import argparse 
 
