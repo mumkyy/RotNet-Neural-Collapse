@@ -114,7 +114,7 @@ def main():
     # Load the checkpoint we want to measure (or the last one found)
     epoch_to_path = discover_checkpoints(exp_dir, args.ckpt_glob)
     all_epochs = sorted(epoch_to_path.keys())
-
+    layers = args.layers
 
     # validate layer keys exist
     layer_keys = [x.strip() for x in args.layers.split(",") if x.strip()]
@@ -132,7 +132,7 @@ def main():
     model.cuda() 
     
     model_weight_statistics = {}
-    for l in layer_keys: 
+    for l in layers: 
         w = model.l.weight
         if isinstance(w, torch.nn.conv2d): 
             w.view(w.shape[0], -1)
