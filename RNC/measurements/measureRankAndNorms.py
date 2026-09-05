@@ -126,13 +126,14 @@ def main():
 
     print(model)
     print(all_epochs)
-
+    print(layers)
     load_state_dict(model, epoch_to_path[max(all_epochs)])
 
     model.cuda() 
     
     model_weight_statistics = {}
     for l in layers: 
+        print(f"processing layer : {l}")
         w = model.l.weight
         if isinstance(w, torch.nn.conv2d): 
             w.view(w.shape[0], -1)
