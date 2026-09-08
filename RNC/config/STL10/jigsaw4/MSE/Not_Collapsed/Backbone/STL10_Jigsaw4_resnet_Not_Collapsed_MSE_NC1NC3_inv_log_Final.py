@@ -52,7 +52,7 @@ config['nc_reg'] = {
 config['nc3_reg'] = {
     'last_layer': 'lin2',
     'classifier': 'classifier',
-    'lambdaNC3': -0.1,
+    'lambdaNC3': -1e-3,
     'use_log': True,
 }
 

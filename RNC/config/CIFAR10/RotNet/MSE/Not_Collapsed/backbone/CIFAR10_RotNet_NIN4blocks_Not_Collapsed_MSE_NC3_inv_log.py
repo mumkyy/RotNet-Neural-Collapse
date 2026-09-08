@@ -38,7 +38,7 @@ config['networks'] = networks
 config['nc3_reg'] = {
     'last_layer': 'penult',
     'classifier': 'classifier',
-    'lambdaNC3': -0.1,
+    'lambdaNC3': -0.001,
     'use_log': True,
 }
 
