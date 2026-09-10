@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import importlib
 import argparse 
-
+import json
 
 
 def parse_args(): 
@@ -21,6 +21,7 @@ def parse_args():
         help="Comma list of exposed feature keys for NC1 (e.g. conv1,conv2,conv3,conv4)",
     )
     p.add_argument("--ckpt-glob", default="model_net_epoch*", help='e.g. "model_net_epoch*"')
+    p.add_argument("--out_path" , default="./ranks", help='output path')
     return p.parse_args()
 
 def build_fresh_model(config , net_key, arch_class):
@@ -105,6 +106,57 @@ def discover_checkpoints(exp_dir, ckpt_glob) :
 
 
 
+def generate_plots(data, outpath):
+    outs = [ f'{outpath}/layerwiseFrobNorms.png' , f'{outpath}/layerwiseStableRank.png' , f'{outpath}/layerwiseNumericRank.png' ] 
+    layer_keys = data.keys() # [ 'featurelayer1', 'featlayer2', ... 'classifier' ] 
+    # dictionaries_of_values = data.values() # [ {layer1 stats} , {layer2 stats} , ...  ]
+    frobs =  {}
+    # iterate the layers
+    for l in layer_keys:
+        # for every dictionary populate the frob with key as layer and 
+        v = data[l]['froNorm'].item()
+        frobs[l] = v 
+    
+    plt.plot(frobs.keys(), frobs.values(), marker='o')
+    plt.xticks(rotation=90) 
+    plt.savefig(outs[0], dpi=300, bbox_inches='tight')
+    plt.title('layerwise frobenius norm')
+    plt.xlabel('layer')
+    plt.ylabel('frobenius norm')
+    plt.close()
+
+    sr =  {}
+    # iterate the layers
+    for l in layer_keys:
+        # for every dictionary populate the frob with key as layer and 
+        v = data[l]['stableRank'].item()
+        sr[l] = v 
+    
+    plt.plot(sr.keys(), sr.values(), marker='o')
+    plt.xticks(rotation=90) 
+    plt.savefig(outs[1], dpi=300, bbox_inches='tight')
+    plt.title('layerwise stable rank')
+    plt.xlabel('layer')
+    plt.ylabel('stable rank')
+    plt.close()
+
+    r =  {}
+    # iterate the layers
+    for l in layer_keys:
+        # for every dictionary populate the frob with key as layer and 
+        v = data[l]['Rank'].item()
+        r[l] = v 
+    
+    plt.plot(r.keys(), r.values(), marker='o')
+    plt.xticks(rotation=90) 
+    plt.savefig(outs[1], dpi=300, bbox_inches='tight')
+    plt.title('layerwise numerical rank')
+    plt.xlabel('layer')
+    plt.ylabel('numerical rank')
+    plt.close()
+
+
+    return
 
 
 def main(): 
@@ -190,7 +242,40 @@ def main():
         computeStats(w, l)
 
     print(model_weight_statistics)
+    # testing
+    # print(model_weight_statistics['_feature_blocks.0.Stem_Conv'])
 
+    # print(model_weight_statistics['_feature_blocks.0.Stem_Conv']['froNorm'])
+
+    # print(model_weight_statistics['_feature_blocks.0.Stem_Conv']['froNorm'].item()) # needs to be referenced by .item() to extract the actual stored value 
+
+    op = Path(args.out_path)
+    op.mkdir(parents=True, exist_ok=True)
+    print(f"generating plots and putting them at {op}")
+    generate_plots(model_weight_statistics, op)
+    def mws(d):
+        o = {}
+
+        for i, (k, v) in enumerate(d.items()):
+            fro = v["froNorm"].item()
+            sr = v["stableRank"].item()
+            r = v["Rank"].item()
+            ws = list(v["weightShape"])
+
+            o[i] = {
+                "layer": k,
+                "fro": fro,
+                "sr": sr,
+                "r": r,
+                "ws": ws
+            }
+
+        return o
+    mod_weight_stats = mws(model_weight_statistics)
+
+    with open(f"{op}/rawText.json" , "w", encoding="utf-8") as f :
+        json.dump(mod_weight_stats, f, indent=4) 
+    f.close() 
     return
 
 if __name__ == "__main__":
