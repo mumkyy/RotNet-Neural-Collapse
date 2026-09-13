@@ -56,6 +56,13 @@ config['nc3_layerwise_pen'] = {
     'no_svd': True,
 }
 
+config['nc3_reg'] = {
+    'last_layer': 'penult',
+    'classifier': 'classifier',
+    'lambdaNC3': -0.001,
+    'use_log': True,
+}
+
 criterions = {}
 criterions['loss'] = {'ctype':'MSELoss', 'opt':None}
 config['criterions'] = criterions
