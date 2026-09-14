@@ -51,7 +51,7 @@ config['nc3_layerwise_pen'] = {
         'conv2.Block2_ConvB3': -1e-3,
         'conv3.Block3_ConvB3': -1e-3,
         'conv4.Block4_ConvB3': -1e-3,
-        'classifier': -1e-3,
+        'classifier': -1e-2,
     },
     'no_svd': True,
 }
@@ -59,7 +59,7 @@ config['nc3_layerwise_pen'] = {
 config['nc3_reg'] = {
     'last_layer': 'penult',
     'classifier': 'classifier',
-    'lambdaNC3': -0.001,
+    'lambdaNC3': -0.005,
     'use_log': True,
 }
 
