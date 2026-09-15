@@ -59,7 +59,7 @@ config['nc3_layerwise_pen'] = {
 config['nc3_reg'] = {
     'last_layer': 'penult',
     'classifier': 'classifier',
-    'lambdaNC3': -0.005,
+    'lambdaNC3': -0.01,
     'use_log': True,
 }
 
