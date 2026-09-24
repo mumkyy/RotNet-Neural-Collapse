@@ -39,9 +39,9 @@ config['nc_reg'] = {
         'conv3': 0.005,
         'conv4': 0.005,
         'conv5': 0.005,
-        'lin1': 0.005,
-        'lin2': 0.005,
-        'classifier': 0.005,
+        'lin1': 1e-3,
+        'lin2': 1e-3,
+        'classifier':5e-4,
     },
     'detach_sb': True,
     'inverse': False,
@@ -79,7 +79,7 @@ config["nc3_layerwise_pen"] = {
 config['nc3_reg'] = {
     'last_layer': 'lin2',
     'classifier': 'classifier',
-    'lambdaNC3': 0.1,
+    'lambdaNC3': 0.01,
     'use_log': True,
 }
 criterions = {}
