@@ -48,9 +48,9 @@ config['nc_reg'] = {
 config['nc3_layerwise_pen'] = {
     'layers': ['conv2.Block2_ConvB3', 'conv3.Block3_ConvB3', 'conv4.Block4_ConvB3', 'classifier'],
     'weights': {
-        'conv2.Block2_ConvB3': -1e-3,
-        'conv3.Block3_ConvB3': -1e-3,
-        'conv4.Block4_ConvB3': -1e-3,
+        'conv2.Block2_ConvB3': -1e-2,
+        'conv3.Block3_ConvB3': -1e-2,
+        'conv4.Block4_ConvB3': -1e-2,
         'classifier': -1e-3,
     },
     'no_svd': True,
