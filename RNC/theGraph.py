@@ -487,7 +487,19 @@ def main():
         help="Plot title.",
     )
 
+    parser.add_argument(
+        "--conditions",
+        default=None,
+        help="Comma-separated subset of conditions. Default: all four.",
+    )
+
     args = parser.parse_args()
+
+    if args.conditions:
+        keep = args.conditions.split(",")
+        for c in list(CONDITIONS):
+            if c not in keep:
+                del CONDITIONS[c]
 
     root = Path(args.root)
 
