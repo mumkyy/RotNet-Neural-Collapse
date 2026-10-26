@@ -29,7 +29,10 @@ def parse_args():
     parser.add_argument("--arch-class", default="NetworkInNetwork")
     parser.add_argument(
         "--layers",
-        help="Comma-separated Conv2d/Linear module names; default: all such modules",
+        help=(
+            "Comma-separated feature keys (such as conv2.block0) or exact weight "
+            "module names; default: all Conv2d/Linear modules"
+        ),
     )
     parser.add_argument("--ckpt-glob", default="model_net_epoch*")
     parser.add_argument("--out-path", "--out_path", dest="out_path", default="./moments")
@@ -93,14 +96,34 @@ def selected_weight_modules(model, names):
     ]
     if names is None:
         return modules
-    requested = {name.strip() for name in names.split(",") if name.strip()}
-    available = {name for name, _ in modules}
-    unknown = requested - available
+    requested = [name.strip() for name in names.split(",") if name.strip()]
+    available = dict(modules)
+    feature_map = getattr(model, "_feature_name_map", {})
+    selected_ids = set()
+    unknown = []
+    no_weights = []
+    for key in requested:
+        if key in available:
+            selected_ids.add(id(available[key]))
+        elif key in feature_map:
+            matches = [
+                module for module in feature_map[key].modules()
+                if isinstance(module, (nn.Conv2d, nn.Linear))
+            ]
+            if matches:
+                selected_ids.update(id(module) for module in matches)
+            else:
+                no_weights.append(key)
+        else:
+            unknown.append(key)
     if unknown:
         raise ValueError(
-            f"Unknown weight module(s): {sorted(unknown)}. Available: {sorted(available)}"
+            f"Unknown layer(s): {unknown}. Feature keys: {list(feature_map)}; "
+            f"weight modules: {list(available)}"
         )
-    return [(name, module) for name, module in modules if name in requested]
+    if no_weights:
+        raise ValueError(f"These feature keys contain no Conv2d/Linear weights: {no_weights}")
+    return [(name, module) for name, module in modules if id(module) in selected_ids]
 
 
 def measure_layer(module):
@@ -161,40 +184,112 @@ def measure_layer(module):
     }
 
 
+def feature_block_label(module_name):
+    """Turn an internal weight name into the feature key shown on the x axis."""
+    match = re.fullmatch(r"_feature_blocks\.(\d+)\.(.+)", module_name)
+    if not match:
+        return module_name
+    stage = int(match.group(1))
+    path = match.group(2)
+    if stage == 0:
+        return "conv1.Stem_Conv"
+    if stage in (1, 2, 3, 4):
+        return f"conv{stage + 1}.{path.split('.')[0]}"
+    head = path.split(".")[0]
+    return head.lower() if head == "Classifier" else head
+
+
+def grouped_axis_ticks(names):
+    """Center one readable label over all measured weights in each feature block."""
+    groups = []
+    for index, name in enumerate(names):
+        label = feature_block_label(name)
+        if groups and groups[-1][0] == label:
+            groups[-1][2] = index
+        else:
+            groups.append([label, index, index])
+
+    positions = [(first + last) / 2 for _, first, last in groups]
+    labels = [label for label, _, _ in groups]
+    return positions, labels
+
+
+def label_depth_axis(ax, positions, labels):
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels, rotation=70, ha="right", fontsize=8)
+    ax.set_xlabel("Feature block (each point is one weight matrix)")
+
+
 def generate_plots(layers, out_path):
     names = list(layers)
     x = list(range(len(names)))
-    fig, axes = plt.subplots(2, 2, figsize=(max(12, 0.6 * len(names)), 9))
-    for order, ax in enumerate(axes.flat, start=1):
+    tick_positions, tick_labels = grouped_axis_ticks(names)
+    plot_width = max(15, 0.8 * len(tick_labels))
+
+    fig, axes = plt.subplots(
+        4,
+        1,
+        sharex=True,
+        figsize=(plot_width, 13),
+        constrained_layout=True,
+    )
+    for order, ax in enumerate(axes, start=1):
         observed = [layers[name]["raw_moments"][str(order)] for name in names]
         gaussian = [
             layers[name]["matched_isotropic_gaussian_raw_moments"][str(order)]
             for name in names
         ]
-        ax.plot(x, observed, "o-", label="Layer", markersize=4)
-        ax.plot(x, gaussian, "--", label="Fitted isotropic Gaussian")
+        ax.plot(
+            x,
+            gaussian,
+            "--",
+            color="0.55",
+            linewidth=1.3,
+            label="Fitted isotropic Gaussian",
+        )
+        ax.plot(
+            x,
+            observed,
+            "o-",
+            color="#24578a",
+            label="Layer",
+            markersize=3,
+        )
         ax.set_title(f"Raw moment {order}: E[X^{order}]")
-        ax.set_xticks(x, names, rotation=90)
-        ax.grid(alpha=0.25)
+        ax.grid(axis="y", alpha=0.25)
+        ax.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3))
         if order == 1:
             ax.legend()
+
+    label_depth_axis(axes[-1], tick_positions, tick_labels)
     fig.suptitle("Stable-rank projections vs matched isotropic Gaussians")
-    fig.tight_layout()
     fig.savefig(out_path / "layerwise_moments.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    fig, axes = plt.subplots(1, 2, figsize=(max(12, 0.6 * len(names)), 4.5))
+    fig, axes = plt.subplots(
+        2,
+        1,
+        sharex=True,
+        figsize=(plot_width, 8),
+        constrained_layout=True,
+    )
     for ax, field, reference, title in (
         (axes[0], "skewness", 0, "Skewness (Gaussian = 0)"),
         (axes[1], "kurtosis", 3, "Kurtosis (Gaussian = 3)"),
     ):
-        ax.plot(x, [layers[name][field] for name in names], "o-", markersize=4)
-        ax.axhline(reference, color="gray", linestyle="--", label="Gaussian")
+        ax.axhline(reference, color="0.55", linestyle="--", label="Gaussian")
+        ax.plot(
+            x,
+            [layers[name][field] for name in names],
+            "o-",
+            color="#24578a",
+            markersize=3,
+        )
         ax.set_title(title)
-        ax.set_xticks(x, names, rotation=90)
-        ax.grid(alpha=0.25)
+        ax.grid(axis="y", alpha=0.25)
         ax.legend()
-    fig.tight_layout()
+
+    label_depth_axis(axes[-1], tick_positions, tick_labels)
     fig.savefig(out_path / "layerwise_gaussian_shape.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
