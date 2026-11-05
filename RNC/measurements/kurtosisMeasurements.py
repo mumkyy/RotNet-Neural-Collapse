@@ -532,16 +532,19 @@ def safe_name(name):
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
 
 
-def plot_rep_svd(svspec, out_path):
+
+def plot_rep_svd(svspec, out_path, k):
     fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
     indices = np.arange(1, len(svspec) + 1)
 
-    ax.plot(indices, svspec)
+    ax.plot(indices, svspec, label="Full spectrum")
+    ax.axvline(x=k, color="red", linestyle="--", label=f"Projected rank: {k}")
     ax.set_yscale("log")
     ax.set_xlabel("Singular-value index")
     ax.set_ylabel("Singular value (log scale)")
     ax.set_title(out_path.stem.replace("_svspec", ""))
-    ax.grid(alpha=0.25)
+    ax.grid(alpha=0.25, which="both")
+    ax.legend()
 
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -622,7 +625,7 @@ def main():
             empirical, gaussian, statistics, key,
             representation_layerwise / f"{safe_name(key)}.png",
         )
-        plot_rep_svd(svspec, representation_layerwise / f"{safe_name(key)}_svspec.png")
+        plot_rep_svd(svspec,representation_layerwise / f"{safe_name(key)}_svspec.png", statistics["projected_dimensions"])
 
         del feature_matrix
 
