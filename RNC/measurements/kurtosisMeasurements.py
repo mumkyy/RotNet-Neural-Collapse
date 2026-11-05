@@ -373,15 +373,26 @@ def measure_representation(
     statistics, empirical_plot, gaussian_plot = projected_moments(
         projected, "coordinate", seed, plot_max_entries
     )
+
+    # _, S, _ = torch.linalg.svd(centered)
+
+    # svspec =  []
+    # num_singularVals = S.size(0)
+    # for i in range(len(num_singularVals)): 
+    #     svspec.append(S[i])
+
+    svspec = torch.linalg.svdvals(centered).detach().cpu().tolist()
+
     statistics.update({
         "representation_shape": list(matrix.shape),
         "frobenius_norm": frobenius_squared**0.5,
         "stable_rank": stable_rank,
         "numerical_rank": int((eigenvalues > largest * 1e-8).sum().item()) if largest > 0 else 0,
         "full_covariance_isotropy_score": full_isotropy_score,
+        "singular_values": svspec,
         **class_metrics,
     })
-    return statistics, empirical_plot, gaussian_plot
+    return statistics, empirical_plot, gaussian_plot, svspec
 
 
 def weight_group_label(module_name):
@@ -521,6 +532,20 @@ def safe_name(name):
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
 
 
+def plot_rep_svd(svspec, out_path):
+    fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
+    indices = np.arange(1, len(svspec) + 1)
+
+    ax.plot(indices, svspec)
+    ax.set_yscale("log")
+    ax.set_xlabel("Singular-value index")
+    ax.set_ylabel("Singular value (log scale)")
+    ax.set_title(out_path.stem.replace("_svspec", ""))
+    ax.grid(alpha=0.25)
+
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    
 def save_json(path, payload):
     with path.open("w", encoding="utf-8") as file:
         json.dump(payload, file, indent=2, allow_nan=False)
@@ -584,7 +609,7 @@ def main():
     representation_results = {}
     for index, key in enumerate(tqdm(feature_keys, desc="Representation projections")):
         feature_matrix = torch.cat(buffers.pop(key), dim=0)
-        statistics, empirical, gaussian = measure_representation(
+        statistics, empirical, gaussian, svspec = measure_representation(
             feature_matrix,
             labels,
             num_classes,
@@ -597,7 +622,10 @@ def main():
             empirical, gaussian, statistics, key,
             representation_layerwise / f"{safe_name(key)}.png",
         )
+        plot_rep_svd(svspec, representation_layerwise / f"{safe_name(key)}_svspec.png")
+
         del feature_matrix
+
     save_json(representations_dir / "rawText.json", {
         "config": str(config_path),
         "checkpoint": str(checkpoint),
