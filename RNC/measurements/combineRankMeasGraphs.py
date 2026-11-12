@@ -68,6 +68,9 @@ def parse_args():
         help="Base plot title.",
     )
 
+    p.add_argument("--best-csv", action="append", default=[],
+                   help="'label=updatedAccs.csv'; best layer = highest mean.")
+
     return p.parse_args()
 
 
@@ -559,6 +562,20 @@ def draw_accuracy_panel(
 
 
 # ============================================================
+# BEST DOWNSTREAM LAYER
+# ============================================================
+
+def mark_best(ax, run_specs, best_x):
+    """Dotted line per run at its best layer; nudged so shared layers stay visible."""
+    for i, spec in enumerate(run_specs):
+        if spec["label"] in best_x:
+            ax.axvline(best_x[spec["label"]] + 0.12 * (i - (len(run_specs) - 1) / 2),
+                       color=spec["color"], linestyle=":", linewidth=1.8)
+    if best_x:
+        ax.plot([], [], color="gray", linestyle=":", linewidth=1.8, label="Best downstream layer")
+
+
+# ============================================================
 # COMMON X AXIS
 # ============================================================
 
@@ -641,6 +658,15 @@ def main():
     )
 
 
+    # Best layer per run: highest-mean probe in its updatedAccs.py CSV.
+    best_x = {}
+    for item in args.best_csv:
+        label, path = item.split("=", 1)
+        acc = read_accuracy_csv(Path(path))
+        best = max((p for p in acc if probe_to_weight_layer(p) in layers), key=lambda p: acc[p]["mean"])
+        best_x[label] = layers.index(probe_to_weight_layer(best))
+
+
     # ========================================================
     # THREE-PANEL GEOMETRY PLOT
     # ========================================================
@@ -677,6 +703,8 @@ def main():
             ylabel=ylabel,
             bounds=bounds,
         )
+
+        mark_best(ax, run_specs, best_x)
 
         ax.legend(
             fontsize=8,
@@ -785,6 +813,8 @@ def main():
                 bounds=bounds,
             )
 
+            mark_best(ax, run_specs, best_x)
+
             ax.legend(
                 fontsize=8,
                 loc="best",
@@ -797,6 +827,8 @@ def main():
             accuracy_points=accuracy_points,
             bounds=bounds,
         )
+
+        mark_best(axes[3], run_specs, best_x)
 
         axes[3].legend(
             fontsize=8,
