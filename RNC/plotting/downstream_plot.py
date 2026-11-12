@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Plot layerwise collapsed downstream accuracy with standard deviation."""
+"""
+Plot layerwise collapsed downstream accuracy with shaded mean ± standard deviation.
+
+Usage:
+    python downstream_plot.py \
+        --series path/to/a.csv RotNet CIFAR10 \
+        --series path/to/b.csv Jigsaw Imagenette \
+        --output collapsed_downstream.pdf
+"""
 
 import argparse
 import csv
@@ -41,19 +49,26 @@ def main():
     for accs, task, dataset in series:
         # Plot each series in the shared layer order.
         keys = [k for k in layers if k in accs]
+        x = [x_of[k] for k in keys]
         means = [accs[k][0] for k in keys]
         stds = [accs[k][1] for k in keys]
 
-        plotted = ax.errorbar(
-            [x_of[k] for k in keys],
+        line, = ax.plot(
+            x,
             means,
-            yerr=stds,
-            fmt="-o",
-            capsize=4,
-            elinewidth=1.2,
+            marker="o",
             label=f"{task} ({dataset})",
         )
-        color = plotted.lines[0].get_color()
+        color = line.get_color()
+
+        ax.fill_between(
+            x,
+            [mean - std for mean, std in zip(means, stds)],
+            [mean + std for mean, std in zip(means, stds)],
+            color=color,
+            alpha=0.2,
+            linewidth=0,
+        )
 
         best = max(accs, key=lambda k: accs[k][0])
         ax.scatter(
